@@ -1,0 +1,432 @@
+{% extends ../base.html %} {% block meta %} {% end %} {% block title %}Crafty
+Controller - Content{% end %} {% block content %}
+
+<link href="/static/assets/css/mccm.css" rel="stylesheet">
+
+<div class="content-wrapper">
+    <div class="row page-title-header">
+        <div class="col-12">
+            <div class="page-header">
+                <h4 class="page-title">
+                    Content - {{ data['server_stats']['server_id']['server_name'] }}
+                    <br /><small>UUID: {{ data['server_stats']['server_id']['server_id'] }}</small>
+                </h4>
+            </div>
+        </div>
+    </div>
+
+    {% include "parts/details_stats.html" %}
+
+    <div class="row">
+        <div class="col-sm-12 grid-margin">
+            <div class="card">
+                <div class="card-body pt-0">
+                    <span class="d-none d-sm-block">
+                        {% include "parts/server_controls_list.html %}
+                    </span>
+
+                    <!-- sub-pestañas internas -->
+                    <ul class="mccm-tabs mt-4" role="tablist">
+                        <li class="nav-item">
+                            <a class="nav-link active" id="mccm-tab-mine" href="#" role="tab">
+                                <i class="ph ph-package"></i> Mi contenido</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" id="mccm-tab-add" href="#" role="tab">
+                                <i class="ph ph-plus-circle"></i> Add content</a>
+                        </li>
+                    </ul>
+
+                    <div class="mt-2"><span id="mccm-status" class="text-muted"></span></div>
+
+                    <!-- ===== Pane: Mi contenido ===== -->
+                    <div id="mccm-pane-mine" class="mt-3">
+                        <div class="d-flex flex-wrap align-items-end" style="gap: .75rem;">
+                            <div>
+                                <label class="small d-block">Canal</label>
+                                <select id="mccm-channel" class="form-control">
+                                    <option value="release" selected>release (estable)</option>
+                                    <option value="beta">beta</option>
+                                    <option value="alpha">alpha</option>
+                                </select>
+                            </div>
+                            <button id="mccm-scan" class="btn btn-outline-primary">
+                                <i class="ph ph-arrows-clockwise"></i> Escanear
+                            </button>
+                            <button id="mccm-plan" class="btn btn-outline-info">
+                                <i class="ph ph-list-magnifying-glass"></i> Ver actualizaciones
+                            </button>
+                            <button id="mccm-apply" class="btn btn-warning" disabled>
+                                <i class="ph ph-download-simple"></i> Aplicar updates
+                            </button>
+                        </div>
+
+                        <div id="mccm-summary" class="mt-3 small text-muted"></div>
+
+                        <div class="d-flex justify-content-between align-items-center flex-wrap" style="gap: 10px;">
+                            <div class="mccm-filters" style="margin-bottom: 0;">
+                                <button class="mccm-filter active" data-f="all">Todos <span class="c"></span></button>
+                                <button class="mccm-filter" data-f="mod">Mods <span class="c"></span></button>
+                                <button class="mccm-filter" data-f="resourcepack">Resource packs <span class="c"></span></button>
+                                <button class="mccm-filter" data-f="shader">Shaders <span class="c"></span></button>
+                                <button class="mccm-filter" data-f="datapack">Datapacks <span class="c"></span></button>
+                            </div>
+                            <input id="mccm-localsearch" class="form-control" style="max-width: 240px;" placeholder="filtrar por nombre...">
+                        </div>
+
+                        <div class="table-responsive mt-2">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th></th>
+                                        <th class="mccm-sort" data-k="name">Mod <span class="arw"></span></th>
+                                        <th class="mccm-sort" data-k="source">Fuente <span class="arw"></span></th>
+                                        <th class="mccm-sort" data-k="side">Lado <span class="arw"></span></th>
+                                        <th class="mccm-sort" data-k="added">Agregado <span class="arw"></span></th>
+                                        <th>Estado</th>
+                                        <th class="mccm-sort text-center" data-k="enabled">Activo <span class="arw"></span></th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="mccm-tbody">
+                                    <tr><td colspan="7" class="text-muted">Pulsa "Escanear" para cargar los mods.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- ===== Pane: Add content ===== -->
+                    <div id="mccm-pane-add" class="mt-3" style="display:none">
+                        <h5 class="mb-3">Buscar e instalar contenido (Modrinth)</h5>
+                        <div class="d-flex flex-wrap align-items-center" style="gap: .5rem;">
+                            <input id="mccm-q" class="form-control" style="max-width: 360px" placeholder="buscar mod, pack, shader, datapack...">
+                            <select id="mccm-type" class="form-control" style="max-width: 180px">
+                                <option value="mod">mod</option>
+                                <option value="resourcepack">resourcepack</option>
+                                <option value="shader">shader</option>
+                                <option value="datapack">datapack</option>
+                            </select>
+                            <button id="mccm-search" class="btn btn-primary">
+                                <i class="ph ph-magnifying-glass"></i> Buscar
+                            </button>
+                        </div>
+                        <div id="mccm-results" class="mt-3">
+                            <div class="text-muted">Escribe algo y pulsa Buscar. Haz clic en un resultado para ver su ficha y elegir versión.</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% end %} {% block js %}
+<script>window.MCCM_SERVER_ID = "{{ data['server_stats']['server_id']['server_id'] }}";</script>
+<script src="/static/assets/js/shared/mccm-common.js"></script>
+<script>
+    let MCCM_INVENTORY = null;
+    let MCCM_FILTER = 'all';
+    let MCCM_QUERY = '';
+    let MCCM_SORT = { key: 'added', dir: 'desc' };  // por defecto: agregado recientemente primero
+    function mccmPersist() { if (MCCM_INVENTORY) mccmApi({ action: "save_cache", inventory: MCCM_INVENTORY }); }
+    // Tras instalar: escanea SOLO ese archivo (rápido) y refresca la UI al instante
+    window.mccmAfterInstall = async (info) => {
+        if (!info || !info.filename) return;
+        const r = await mccmApi({ action: "scan_one", filename: info.filename, content_type: info.type || 'mod' });
+        if (r.status !== "ok" || !r.data) return;
+        MCCM_INVENTORY = (MCCM_INVENTORY || []).filter(x =>
+            x.filename !== info.filename && (!info.old || x.filename !== info.old));
+        MCCM_INVENTORY.push(r.data);
+        renderTable(MCCM_INVENTORY);
+        mccmPersist();
+        mccmRenderResults();  // refresca las tarjetas de Add content -> "Installed"
+        mccmStatus(`Instalado: ${info.filename}. Reinicia el servidor para aplicarlo.`);
+    };
+    document.querySelectorAll('.mccm-filter').forEach(b => b.onclick = () => {
+        MCCM_FILTER = b.dataset.f;
+        document.querySelectorAll('.mccm-filter').forEach(x => x.classList.toggle('active', x === b));
+        if (MCCM_INVENTORY) renderTable(MCCM_INVENTORY);
+    });
+    document.getElementById('mccm-localsearch').oninput = (e) => {
+        MCCM_QUERY = e.target.value.trim();
+        if (MCCM_INVENTORY) renderTable(MCCM_INVENTORY);
+    };
+    function mccmAgo(ts) {
+        if (!ts) return '<span class="text-muted">-</span>';
+        const d = new Date(ts * 1000);
+        const diff = (Date.now() - d.getTime()) / 1000;
+        let txt;
+        if (diff < 90) txt = 'ahora';
+        else if (diff < 3600) txt = 'hace ' + Math.floor(diff / 60) + ' min';
+        else if (diff < 86400) txt = 'hace ' + Math.floor(diff / 3600) + ' h';
+        else if (diff < 86400 * 30) txt = 'hace ' + Math.floor(diff / 86400) + ' d';
+        else txt = d.toISOString().slice(0, 10);
+        const cls = diff < 86400 ? 'mccm-new' : 'text-muted';
+        return `<span class="${cls}" title="${d.toLocaleString()}">${txt}</span>`;
+    }
+    function mccmSortInv(list) {
+        const k = MCCM_SORT.key, sign = MCCM_SORT.dir === 'asc' ? 1 : -1;
+        const val = r => k === 'name' ? (r.title || r.display || '').toLowerCase()
+            : k === 'source' ? (r.source || '')
+            : k === 'side' ? (r.side || '')
+            : k === 'enabled' ? (r.enabled ? 1 : 0)
+            : k === 'added' ? (r.added || 0) : '';
+        return list.slice().sort((a, b) => {
+            const va = val(a), vb = val(b);
+            return va < vb ? -sign : va > vb ? sign : 0;
+        });
+    }
+    function mccmUpdateSortArrows() {
+        document.querySelectorAll('.mccm-sort').forEach(th => {
+            const s = th.querySelector('.arw');
+            if (s) s.textContent = th.dataset.k === MCCM_SORT.key ? (MCCM_SORT.dir === 'asc' ? '▲' : '▼') : '';
+        });
+    }
+    document.querySelectorAll('.mccm-sort').forEach(th => th.onclick = () => {
+        const k = th.dataset.k;
+        if (MCCM_SORT.key === k) MCCM_SORT.dir = MCCM_SORT.dir === 'asc' ? 'desc' : 'asc';
+        else MCCM_SORT = { key: k, dir: k === 'added' ? 'desc' : 'asc' };
+        if (MCCM_INVENTORY) renderTable(MCCM_INVENTORY);
+    });
+    // versión de MC del servidor (para resaltar compatibilidad en la ficha)
+    mccmApi({ action: "context" }).then(r => { if (r.status === "ok" && r.data) window.MCCM_MC = r.data.mc; });
+
+    // ---- sub-pestañas ----
+    function mccmShowTab(which) {
+        const mine = which === 'mine';
+        document.getElementById('mccm-pane-mine').style.display = mine ? '' : 'none';
+        document.getElementById('mccm-pane-add').style.display = mine ? 'none' : '';
+        document.getElementById('mccm-tab-mine').classList.toggle('active', mine);
+        document.getElementById('mccm-tab-add').classList.toggle('active', !mine);
+    }
+    document.getElementById('mccm-tab-mine').onclick = (e) => { e.preventDefault(); mccmShowTab('mine'); };
+    document.getElementById('mccm-tab-add').onclick = (e) => { e.preventDefault(); mccmShowTab('add'); };
+
+    // ---- Mi contenido ----
+    function renderTable(inv) {
+        const rank = { release: 0, beta: 1, alpha: 2 };
+        const selCh = document.getElementById("mccm-channel").value;
+        const counts = { all: inv.length, mod: 0, resourcepack: 0, shader: 0, datapack: 0 };
+        inv.forEach(r => { counts[r.content_type] = (counts[r.content_type] || 0) + 1; });
+        document.querySelectorAll('.mccm-filter').forEach(b => {
+            const span = b.querySelector('.c'); if (span) span.textContent = '(' + (counts[b.dataset.f] || 0) + ')';
+        });
+        let shown = MCCM_FILTER === 'all' ? inv : inv.filter(r => (r.content_type || 'mod') === MCCM_FILTER);
+        if (MCCM_QUERY) {
+            const q = MCCM_QUERY.toLowerCase();
+            shown = shown.filter(r => ((r.title || '') + ' ' + (r.display || r.filename || '') + ' ' + (r.author || '')).toLowerCase().includes(q));
+        }
+        shown = mccmSortInv(shown);
+        mccmUpdateSortArrows();
+        const rows = shown.map(r => {
+            const icon = r.icon
+                ? `<img src="${esc(r.icon)}" width="34" height="34" style="border-radius:6px" onerror="this.replaceWith(document.createTextNode(''))">`
+                : `<span class="badge badge-secondary">${esc((r.title || '?')[0])}</span>`;
+            const ct = esc(r.content_type || 'mod');
+            let estado;
+            if (r.update && (rank[r.channel] ?? 0) <= rank[selCh]) {
+                const lbl = (r.channel && r.channel !== 'release') ? `Actualizar (${r.channel})` : 'Actualizar';
+                estado = `<button class="btn btn-sm btn-warning mccm-upd" data-file="${esc(r.filename)}" data-ctype="${ct}">${lbl}</button>`;
+            } else if (r.update) {
+                estado = `<span class="text-success">al día</span> <small class="text-muted">(${r.channel} disp.)</small>`;
+            } else {
+                estado = '<span class="text-success">al día</span>';
+            }
+            const chk = r.enabled === false ? '' : 'checked';
+            const toggle = `<label class="mccm-switch" title="Activar/desactivar"><input type="checkbox" class="mccm-tog" data-file="${esc(r.filename)}" data-ctype="${ct}" ${chk}><span class="mccm-slider"></span></label>`;
+            const trash = `<button class="mccm-trash mccm-del" data-file="${esc(r.filename)}" data-ctype="${ct}" title="Borrar"><i class="ph ph-trash"></i></button>`;
+            return `<tr style="${r.enabled === false ? 'opacity:.45' : ''}">
+                <td style="width:44px">${icon}</td>
+                <td><a href="#" class="mccm-detail" data-file="${esc(r.filename)}"><b>${esc(r.title || r.display)}</b></a><br><small class="text-muted">${esc(r.display)}${r.author ? ' · por ' + esc(r.author) : ''}</small></td>
+                <td>${badge(r.source)}</td>
+                <td>${r.side || '-'}</td>
+                <td class="text-nowrap">${mccmAgo(r.added)}</td>
+                <td>${estado}</td>
+                <td class="text-center">${toggle}</td>
+                <td class="text-center">${trash}</td></tr>`;
+        }).join('');
+        document.getElementById("mccm-tbody").innerHTML =
+            rows || '<tr><td colspan="8" class="text-muted">Sin contenido de este tipo.</td></tr>';
+        const c = {};
+        inv.forEach(r => c[r.source] = (c[r.source] || 0) + 1);
+        document.getElementById("mccm-summary").innerHTML =
+            `${inv.length} mods — Modrinth: ${c.modrinth || 0}, CurseForge: ${c.curseforge || 0}, sin identificar: ${c.unknown || 0}`;
+        document.querySelectorAll('.mccm-upd').forEach(b => b.onclick = mccmUpdateOne);
+        document.querySelectorAll('.mccm-tog').forEach(b => b.onchange = mccmToggle);
+        document.querySelectorAll('.mccm-del').forEach(b => b.onclick = mccmDelete);
+        document.querySelectorAll('.mccm-detail').forEach(a => a.onclick = function (ev) {
+            ev.preventDefault();
+            const rec = (MCCM_INVENTORY || []).find(x => x.filename === this.dataset.file);
+            if (!rec) return;
+            const src = rec.source;
+            const id = src === 'modrinth' ? (rec.modrinth && (rec.modrinth.slug || rec.modrinth.projectId))
+                : (rec.curseforge && rec.curseforge.modId);
+            mccmOpenDetail(src, id, rec.filename, rec.content_type || 'mod');
+        });
+    }
+    async function mccmRescan() {
+        const s = await mccmApi({ action: "scan" });
+        if (s.status === "ok") { MCCM_INVENTORY = s.data; renderTable(s.data); }
+    }
+    async function mccmUpdateOne(e) {
+        const btn = e.currentTarget, file = btn.dataset.file, ct = btn.dataset.ctype || 'mod';
+        const channel = document.getElementById("mccm-channel").value;
+        btn.disabled = true; btn.textContent = "Actualizando...";
+        const r = await mccmApi({ action: "update_one", filename: file, channel, content_type: ct });
+        if (r.status === "ok" && r.data && r.data.ok) {
+            const rec = (MCCM_INVENTORY || []).find(x => x.filename === file);
+            if (rec) { rec.filename = r.data.new; rec.display = r.data.new; rec.update = false; rec.latest = r.data.new; }
+            renderTable(MCCM_INVENTORY); mccmPersist();
+            mccmStatus(`Actualizado: ${file} → ${r.data.new}. Reinicia el servidor.`);
+        } else {
+            btn.disabled = false; btn.textContent = "Actualizar";
+            mccmStatus("No se pudo actualizar: " + ((r.data && r.data.reason) || r.error || "error"));
+        }
+    }
+    async function mccmToggle(e) {
+        const chk = e.currentTarget, file = chk.dataset.file, ct = chk.dataset.ctype || 'mod';
+        const r = await mccmApi({ action: "toggle", filename: file, content_type: ct });
+        if (r.status === "ok" && r.data && r.data.ok) {
+            const rec = (MCCM_INVENTORY || []).find(x => x.filename === file);
+            if (rec) { rec.enabled = r.data.enabled; rec.filename = r.data.filename; }
+            renderTable(MCCM_INVENTORY); mccmPersist();
+            mccmStatus((r.data.enabled ? "Activado" : "Desactivado") + ": " + file);
+        } else { chk.checked = !chk.checked; mccmStatus("No se pudo cambiar el estado."); }
+    }
+    async function mccmDelete(e) {
+        const btn = e.currentTarget, file = btn.dataset.file, ct = btn.dataset.ctype || 'mod';
+        if (!confirm(`¿Borrar ${file}? Se moverá a _backup/ (reversible).`)) return;
+        const r = await mccmApi({ action: "remove", filename: file, content_type: ct });
+        if (r.status === "ok" && r.data && r.data.ok) {
+            MCCM_INVENTORY = (MCCM_INVENTORY || []).filter(x => x.filename !== file);
+            renderTable(MCCM_INVENTORY); mccmPersist();
+            mccmStatus("Borrado (backup): " + file);
+        } else mccmStatus("No se pudo borrar.");
+    }
+    document.getElementById("mccm-scan").onclick = async () => {
+        mccmStatus("Escaneando...", true);
+        const r = await mccmApi({ action: "scan" });
+        if (r.status === "ok") { MCCM_INVENTORY = r.data; renderTable(r.data); mccmStatus("Escaneo completo."); }
+        else mccmStatus("Error: " + (r.error || "desconocido"));
+    };
+    document.getElementById("mccm-plan").onclick = async () => {
+        const channel = document.getElementById("mccm-channel").value;
+        mccmStatus("Buscando actualizaciones...", true);
+        const r = await mccmApi({ action: "plan", channel, inventory: MCCM_INVENTORY });
+        if (r.status !== "ok") { mccmStatus("Error: " + (r.error || "")); return; }
+        const plan = r.data;
+        const applyBtn = document.getElementById("mccm-apply");
+        if (!plan.length) { mccmStatus(`Nada que actualizar en canal ${channel}.`); applyBtn.disabled = true; return; }
+        const list = plan.map(p => `<li>(${p.source}) <b>${p.name}</b> → ${p.newname} [${p.channel}]${p.blocked ? ' <span class="text-danger">(descarga bloqueada)</span>' : ''}</li>`).join('');
+        document.getElementById("mccm-summary").innerHTML =
+            `<b>${plan.length} actualizaciones (${channel}):</b><ul>${list}</ul>`;
+        applyBtn.disabled = false;
+        mccmStatus(`${plan.length} updates listos para aplicar.`);
+    };
+    document.getElementById("mccm-apply").onclick = async () => {
+        const channel = document.getElementById("mccm-channel").value;
+        if (!confirm(`Aplicar actualizaciones (${channel})? Se hará backup de los jars actuales en mods/_backup/.`)) return;
+        mccmStatus("Descargando y aplicando...", true);
+        const r = await mccmApi({ action: "apply", channel, confirm: true, inventory: MCCM_INVENTORY });
+        if (r.status !== "ok") { mccmStatus("Error: " + (r.error || "")); return; }
+        const ok = r.data.results.filter(x => x.ok).length;
+        mccmStatus(`Aplicados ${ok}/${r.data.results.length}. Backup en ${r.data.backup}. Reinicia el servidor.`);
+        document.getElementById("mccm-apply").disabled = true;
+        await mccmRescan();
+    };
+    document.getElementById("mccm-channel").onchange = () => {
+        if (MCCM_INVENTORY) renderTable(MCCM_INVENTORY);
+    };
+
+    // ---- Add content (buscar) ----
+    function mccmFindInstalled(h) {
+        if (!MCCM_INVENTORY) return null;
+        return MCCM_INVENTORY.find(r => r.modrinth &&
+            (r.modrinth.projectId === h.project_id || r.modrinth.slug === h.slug)) || null;
+    }
+    function mccmCard(h, type) {
+        const icon = h.icon_url
+            ? `<img class="thumb" src="${esc(h.icon_url)}" onerror="this.style.visibility='hidden'">`
+            : `<span class="thumb"></span>`;
+        const cats = (h.display_categories || h.categories || []).slice(0, 6)
+            .map(c => `<span class="badge">${esc(c)}</span>`).join('');
+        const dl = (h.downloads || 0).toLocaleString();
+        const ago = h.date_modified ? h.date_modified.slice(0, 10) : '';
+        const inst = mccmFindInstalled(h);
+        let action;
+        if (inst && inst.update) {
+            const lbl = (inst.channel && inst.channel !== 'release') ? `Actualizar (${inst.channel})` : 'Actualizar';
+            action = `<button class="btn btn-sm btn-warning mccm-cardupd" data-file="${esc(inst.filename)}" data-channel="${esc(inst.channel || 'release')}" data-ctype="${esc(inst.content_type || 'mod')}">${lbl}</button>`;
+        } else if (inst) {
+            action = `<span class="badge badge-success" style="padding:7px 12px"><i class="ph ph-check"></i> Installed</span>`;
+        } else {
+            action = `<button class="btn btn-sm btn-outline-primary open-detail" data-slug="${esc(h.slug)}" data-type="${esc(type)}">Ver / versiones</button>`;
+        }
+        return `<div class="mccm-card">
+            ${icon}
+            <div class="grow">
+                <a href="#" class="open-detail" data-slug="${esc(h.slug)}" data-type="${esc(type)}"><b>${esc(h.title)}</b></a>
+                <span class="text-muted"> por ${esc(h.author || '?')}</span>
+                <div class="desc">${esc(h.description || '')}</div>
+                <div class="cats">${cats}</div>
+                <div class="meta">
+                    <i class="ph ph-download-simple"></i> ${dl} descargas &nbsp;·&nbsp;
+                    <i class="ph ph-clock"></i> ${ago} &nbsp;·&nbsp;
+                    server=${esc(h.server_side || '?')}, client=${esc(h.client_side || '?')}
+                </div>
+            </div>
+            <div class="text-nowrap">${action}</div>
+        </div>`;
+    }
+    async function mccmCardUpdate(e) {
+        const b = e.currentTarget, file = b.dataset.file, channel = b.dataset.channel || 'release', ct = b.dataset.ctype || 'mod';
+        b.disabled = true; b.textContent = 'Actualizando...';
+        const r = await mccmApi({ action: "update_one", filename: file, channel, content_type: ct });
+        if (r.status === "ok" && r.data && r.data.ok) {
+            b.outerHTML = '<span class="badge badge-success" style="padding:7px 12px"><i class="ph ph-check"></i> Installed</span>';
+            const rec = (MCCM_INVENTORY || []).find(x => x.filename === file);
+            if (rec) { rec.filename = r.data.new; rec.display = r.data.new; rec.update = false; rec.latest = r.data.new; }
+            renderTable(MCCM_INVENTORY); mccmPersist();
+            mccmStatus(`Actualizado: ${file} → ${r.data.new}. Reinicia el servidor.`);
+        } else {
+            b.disabled = false; b.textContent = 'Actualizar';
+            mccmStatus("No se pudo actualizar: " + ((r.data && r.data.reason) || r.error || "error"));
+        }
+    }
+    let MCCM_LAST_HITS = null, MCCM_LAST_TYPE = 'mod';
+    function mccmRenderResults() {
+        const box = document.getElementById("mccm-results");
+        if (!box || !MCCM_LAST_HITS) return;
+        box.innerHTML = MCCM_LAST_HITS.map(h => mccmCard(h, MCCM_LAST_TYPE)).join('') ||
+            '<div class="text-muted">Sin resultados para ese filtro.</div>';
+        document.querySelectorAll('.open-detail').forEach(el => el.onclick = function (ev) {
+            ev.preventDefault();
+            mccmOpenDetail('modrinth', this.dataset.slug, null, this.dataset.type);
+        });
+        document.querySelectorAll('.mccm-cardupd').forEach(b => b.onclick = mccmCardUpdate);
+    }
+    async function mccmDoSearch() {
+        const q = document.getElementById("mccm-q").value;
+        const type = document.getElementById("mccm-type").value;
+        if (!MCCM_INVENTORY) { await mccmRescan(); }  // asegura saber qué está instalado
+        mccmStatus("Buscando en Modrinth...", true);
+        const r = await mccmApi({ action: "search", query: q, type: type, limit: 20 });
+        mccmStatus("");
+        if (r.status !== "ok") { document.getElementById("mccm-results").innerHTML = "Error en la búsqueda."; return; }
+        MCCM_LAST_HITS = r.data; MCCM_LAST_TYPE = type;
+        mccmRenderResults();
+    }
+    document.getElementById("mccm-search").onclick = mccmDoSearch;
+    document.getElementById("mccm-q").addEventListener("keydown", e => { if (e.key === "Enter") mccmDoSearch(); });
+
+    // Al abrir: carga el último escaneo cacheado (instantáneo)
+    (async function mccmInit() {
+        const r = await mccmApi({ action: "cached" });
+        if (r.status === "ok" && r.data && Array.isArray(r.data.inventory) && r.data.inventory.length) {
+            MCCM_INVENTORY = r.data.inventory;
+            renderTable(MCCM_INVENTORY);
+            mccmStatus(`Cargado del último escaneo (${r.data.scanned_at || "?"}). Pulsa "Escanear" para refrescar.`);
+        }
+    })();
+</script>
+{% end %}

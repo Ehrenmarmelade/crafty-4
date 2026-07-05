@@ -35,6 +35,7 @@ SUBPAGE_PERMS = {
     "schedules": EnumPermissionsServer.SCHEDULE,
     "backup": EnumPermissionsServer.BACKUP,
     "files": EnumPermissionsServer.FILES,
+    "content": EnumPermissionsServer.FILES,
     "config": EnumPermissionsServer.CONFIG,
     "admin_controls": EnumPermissionsServer.PLAYERS,
     "metrics": EnumPermissionsServer.LOGS,
