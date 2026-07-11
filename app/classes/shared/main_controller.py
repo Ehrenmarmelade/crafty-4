@@ -1,6 +1,9 @@
 import os
+import re
 import sys
 import pathlib
+import requests
+from xml.etree import ElementTree
 from pathlib import Path
 from datetime import datetime
 import platform
@@ -606,23 +609,43 @@ class Controller:
         )
         if data["create_type"] == "minecraft_java":
             if root_create_data["create_type"] == "download_jar":
-                # modded update urls from server jars will only update the installer
-                if create_data["type"] not in MODDED_TYPES:
-                    server_obj = self.servers.get_server_obj(new_server_id)
-                    url = self.big_bucket.get_fetch_url(
+                build = create_data.get("build")
+                if build and create_data["type"] in (
+                    "neoforge-installer",
+                    "forge-installer",
+                    "fabric",
+                ):
+                    # Install a specific loader build from the official source.
+                    threading.Thread(
+                        target=self._t_create_loader_build,
+                        name=f"create_build-{new_server_id}",
+                        daemon=True,
+                        args=(
+                            new_server_id,
+                            new_server_path,
+                            create_data["type"],
+                            create_data["version"],
+                            build,
+                        ),
+                    ).start()
+                else:
+                    # modded update urls from server jars only update the installer
+                    if create_data["type"] not in MODDED_TYPES:
+                        server_obj = self.servers.get_server_obj(new_server_id)
+                        url = self.big_bucket.get_fetch_url(
+                            create_data["category"],
+                            create_data["type"],
+                            create_data["version"],
+                        )
+                        server_obj.executable_update_url = url
+                        self.servers.update_server(server_obj)
+                    self.import_helper.download_threaded_exe(
                         create_data["category"],
                         create_data["type"],
                         create_data["version"],
+                        full_jar_path,
+                        new_server_id,
                     )
-                    server_obj.executable_update_url = url
-                    self.servers.update_server(server_obj)
-                self.import_helper.download_threaded_exe(
-                    create_data["category"],
-                    create_data["type"],
-                    create_data["version"],
-                    full_jar_path,
-                    new_server_id,
-                )
             elif root_create_data["create_type"] == "import_server":
                 existing_archive_path = self.file_helper.get_absolute_path(
                     IMPORT_PATH, create_data["archive_name"]
@@ -1165,3 +1188,276 @@ class Controller:
             "move_status",
             "done",
         )
+
+    # **********************************************************************************
+    #                          Loader (NeoForge/Forge/Fabric) version manager
+    # **********************************************************************************
+    def get_loader_versions(self):
+        """Return available loader types and their versions from the big bucket
+        (category ``mc_java_servers``). Each version is keyed by its Minecraft
+        version, with the concrete loader build in ``loader_version``."""
+        data = self.big_bucket.get_bucket_data() or {}
+        types = data.get("mc_java_servers", {}).get("types", {}) or {}
+        out = {}
+        for loader_type, tdata in types.items():
+            versions = (tdata or {}).get("versions", {}) or {}
+            out[loader_type] = [
+                {"version": v, "loader_version": versions[v].get("loader_version")}
+                for v in versions
+            ]
+        return out
+
+    def detect_server_loader(self, server_id):
+        """Best-effort detection of a server's current loader + version, read
+        from its execution command."""
+        server = self.servers.get_server_data_by_id(server_id)
+        cmd = str(server.get("execution_command", "") or "")
+        # Modern NeoForge/Forge run form: @libraries/net/<vendor>/<loader>/<ver>/win_args.txt
+        match = re.search(
+            r"(?:neoforged|minecraftforge)[\\/](neoforge|forge)[\\/]"
+            r"([0-9][0-9A-Za-z.\-]*)[\\/]win_args",
+            cmd,
+        )
+        if match:
+            return {"loader": match.group(1), "version": match.group(2)}
+        # Installer form (pre-install / older): <loader>-installer-<ver>.jar
+        match = re.search(
+            r"(forge|neoforge)-installer-([0-9]+(?:\.[0-9]+)*)", cmd
+        )
+        if match:
+            return {"loader": match.group(1), "version": match.group(2)}
+        low = cmd.lower()
+        for keyword in ("fabric", "purpur", "paper", "folia"):
+            if keyword in low:
+                return {"loader": keyword, "version": None}
+        if "-jar" in low:
+            return {"loader": "vanilla", "version": None}
+        return {"loader": "unknown", "version": None}
+
+    def change_server_loader(
+        self, server_id, loader_type, version, user_id, source_ip=None, build=None
+    ):
+        """Start a background thread that replaces a server's loader with the
+        chosen ``loader_type`` + Minecraft ``version`` (and optionally a specific
+        loader ``build``). The caller must ensure the server is stopped."""
+        thread = threading.Thread(
+            target=self._t_change_server_loader,
+            daemon=True,
+            name=f"loader_change_{server_id}",
+            args=(server_id, loader_type, version, user_id, source_ip, build),
+        )
+        thread.start()
+
+    @staticmethod
+    def _extract_memory(command):
+        mem = re.search(
+            r"-Xms([0-9A-Za-z.]+)\s+-Xmx([0-9A-Za-z.]+)", str(command or "")
+        )
+        return (mem.group(1), mem.group(2)) if mem else ("2048M", "4096M")
+
+    def _t_change_server_loader(
+        self, server_id, loader_type, version, user_id, source_ip, build=None
+    ):
+        try:
+            server_obj = self.servers.get_server_obj(server_id)
+            server_path = server_obj.path
+            old = self.detect_server_loader(server_id)
+            xms, xmx = self._extract_memory(server_obj.execution_command)
+
+            installed = False
+            if build and loader_type in MODDED_TYPES:
+                installed = self._install_modded_build(
+                    server_obj, server_path, server_id, loader_type, build, xms, xmx
+                )
+            elif build and loader_type == "fabric":
+                installed = self._install_fabric_build(
+                    server_obj, server_path, version, build, xms, xmx
+                )
+
+            if not installed:
+                # Fallback: big bucket (latest build for the chosen MC version).
+                if loader_type in MODDED_TYPES:
+                    server_file = f"{loader_type}-{version}.jar"
+                    server_obj.execution_command = (
+                        f'java -Xms{xms} -Xmx{xmx} -jar "{server_file}" --installServer'
+                    )
+                else:
+                    server_file = f"{loader_type}.jar"
+                    server_obj.execution_command = (
+                        f'java -Xms{xms} -Xmx{xmx} -jar "{server_file}" nogui'
+                    )
+                server_obj.executable = server_file
+                self.servers.update_server(server_obj)
+                full_jar_path = os.path.join(server_path, server_file)
+                self.import_helper.download_threaded_exe(
+                    "mc_java_servers", loader_type, version, full_jar_path, server_id
+                )
+
+            # Remove the previous modded library version if it actually changed.
+            if old.get("loader") in ("neoforge", "forge") and old.get("version"):
+                new = self.detect_server_loader(server_id)
+                if new.get("version") and new.get("version") != old.get("version"):
+                    vendor = (
+                        "neoforged" if old["loader"] == "neoforge" else "minecraftforge"
+                    )
+                    old_lib = os.path.join(
+                        server_path, "libraries", "net", vendor,
+                        old["loader"], old["version"],
+                    )
+                    if os.path.isdir(old_lib):
+                        FileHelpers.del_dirs(old_lib)
+
+            self.management.add_to_audit_log(
+                user_id,
+                f"changed loader to {loader_type} {build or version}",
+                server_id=server_id,
+                source_ip=source_ip,
+            )
+            self.servers.init_all_servers()
+        except Exception:
+            logger.exception("Failed to change server loader")
+
+    def _install_modded_build(
+        self, server_obj, server_path, server_id, loader_type, build, xms, xmx
+    ):
+        """Download a specific NeoForge/Forge installer build from the official
+        maven and run it (the installer rewrites the run command)."""
+        if loader_type == "neoforge-installer":
+            url = (
+                "https://maven.neoforged.net/releases/net/neoforged/neoforge/"
+                f"{build}/neoforge-{build}-installer.jar"
+            )
+        else:
+            url = (
+                "https://maven.minecraftforge.net/net/minecraftforge/forge/"
+                f"{build}/forge-{build}-installer.jar"
+            )
+        server_file = f"{loader_type}-{build}.jar"
+        server_obj.execution_command = (
+            f'java -Xms{xms} -Xmx{xmx} -jar "{server_file}" --installServer'
+        )
+        server_obj.executable = server_file
+        self.servers.update_server(server_obj)
+        if not self.file_helper.ssl_get_file(url, server_path, server_file):
+            logger.error(f"Failed to download modded installer from {url}")
+            return False
+        self.import_helper.modded_installer.install(
+            server_path, server_id, self.servers.get_server_obj(server_id)
+        )
+        return True
+
+    def _install_fabric_build(
+        self, server_obj, server_path, mc_version, loader_build, xms, xmx
+    ):
+        """Download a ready-to-run Fabric server launcher for a specific MC +
+        loader version from the Fabric meta API."""
+        installer = self._fabric_latest_installer()
+        if not installer:
+            return False
+        url = (
+            f"https://meta.fabricmc.net/v2/versions/loader/{mc_version}/"
+            f"{loader_build}/{installer}/server/jar"
+        )
+        server_file = "fabric.jar"
+        if not self.file_helper.ssl_get_file(url, server_path, server_file):
+            logger.error(f"Failed to download fabric server from {url}")
+            return False
+        server_obj.execution_command = (
+            f'java -Xms{xms} -Xmx{xmx} -jar "{server_file}" nogui'
+        )
+        server_obj.executable = server_file
+        self.servers.update_server(server_obj)
+        return True
+
+    def get_loader_builds(self, loader, mc_version):
+        """Return concrete loader builds for a loader type + MC version, newest
+        first, from official sources. Cached in memory for 30 minutes."""
+        if not hasattr(self, "_loader_builds_cache"):
+            self._loader_builds_cache = {}
+        cache_key = f"{loader}:{mc_version}"
+        now = int(time.time())
+        cached = self._loader_builds_cache.get(cache_key)
+        if cached and now - cached[0] < 1800:
+            return cached[1]
+        builds = []
+        try:
+            if loader in ("neoforge-installer", "forge-installer"):
+                builds = self._fetch_neoforge_builds(mc_version)
+            elif loader == "fabric":
+                builds = self._fetch_fabric_builds()
+        except Exception:
+            logger.exception("Failed to fetch loader builds")
+            builds = []
+        self._loader_builds_cache[cache_key] = (now, builds)
+        return builds
+
+    @staticmethod
+    def _fetch_neoforge_builds(mc_version):
+        match = re.match(r"1\.(\d+)(?:\.(\d+))?$", str(mc_version))
+        if not match:
+            return []
+        prefix = f"{match.group(1)}.{match.group(2) or '0'}."
+        url = (
+            "https://maven.neoforged.net/releases/net/neoforged/neoforge/"
+            "maven-metadata.xml"
+        )
+        resp = requests.get(url, timeout=8)
+        root = ElementTree.fromstring(resp.content)
+        versions = [v.text for v in root.iter("version") if v.text]
+        matching = [v for v in versions if v.startswith(prefix)]
+
+        def sort_key(v):
+            tail = v[len(prefix):].split("-")[0]
+            return int(tail) if tail.isdigit() else 0
+
+        matching.sort(key=sort_key, reverse=True)
+        return [{"build": v, "stable": "beta" not in v} for v in matching]
+
+    @staticmethod
+    def _fetch_fabric_builds():
+        resp = requests.get(
+            "https://meta.fabricmc.net/v2/versions/loader", timeout=8
+        )
+        return [
+            {"build": e["version"], "stable": bool(e.get("stable"))}
+            for e in resp.json()
+        ]
+
+    @staticmethod
+    def _fabric_latest_installer():
+        try:
+            data = requests.get(
+                "https://meta.fabricmc.net/v2/versions/installer", timeout=8
+            ).json()
+            for entry in data:
+                if entry.get("stable"):
+                    return entry["version"]
+            return data[0]["version"] if data else None
+        except Exception:
+            logger.exception("Failed to fetch fabric installer version")
+            return None
+
+    def _t_create_loader_build(
+        self, server_id, server_path, loader_type, version, build
+    ):
+        """Thread target: install a specific loader build for a freshly created
+        server, wrapped in import status so the UI reflects progress."""
+        try:
+            ServersController.set_import(server_id)
+            server_obj = self.servers.get_server_obj(server_id)
+            xms, xmx = self._extract_memory(server_obj.execution_command)
+            if loader_type in MODDED_TYPES:
+                self._install_modded_build(
+                    server_obj, server_path, server_id, loader_type, build, xms, xmx
+                )
+            elif loader_type == "fabric":
+                self._install_fabric_build(
+                    server_obj, server_path, version, build, xms, xmx
+                )
+        except Exception:
+            logger.exception("Failed to install specific loader build at creation")
+        finally:
+            ServersController.finish_import(server_id)
+            WebSocketManager().broadcast_to_server_users(
+                server_id, "send_start_reload", {}
+            )

@@ -21,6 +21,12 @@ from app.classes.web.routes.api.servers.index import ApiServersIndexHandler
 from app.classes.web.routes.api.servers.server.action import (
     ApiServersServerActionHandler,
 )
+from app.classes.web.routes.api.servers.server.loader import (
+    ApiServersServerLoaderHandler,
+)
+from app.classes.web.routes.api.crafty.loader_builds import (
+    ApiCraftyLoaderBuildsHandler,
+)
 from app.classes.web.routes.api.servers.server.index import (
     ApiServersServerIndexHandler,
     ApiServersServerUpdateConfig,
@@ -334,6 +340,11 @@ def api_handlers(handler_args):
             handler_args,
         ),
         (
+            r"/api/v2/crafty/loader_builds/?",
+            ApiCraftyLoaderBuildsHandler,
+            handler_args,
+        ),
+        (
             r"/api/v2/servers/status/?",
             ApiServersServerStatusHandler,
             handler_args,
@@ -346,6 +357,11 @@ def api_handlers(handler_args):
         (
             r"/api/v2/servers/([a-z0-9-]+)/update/config/?",
             ApiServersServerUpdateConfig,
+            handler_args,
+        ),
+        (
+            r"/api/v2/servers/([a-z0-9-]+)/loader/?",
+            ApiServersServerLoaderHandler,
             handler_args,
         ),
         (
