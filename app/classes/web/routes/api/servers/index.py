@@ -240,6 +240,13 @@ new_server_schema = {
                             "error": "typeString",
                             "fill": True,
                         },
+                        "build": {
+                            "title": "Specific loader build",
+                            "type": "string",
+                            "examples": ["21.1.235"],
+                            "error": "typeString",
+                            "fill": True,
+                        },
                         "mem_min": {
                             "title": MIN_MEM,
                             "type": "number",

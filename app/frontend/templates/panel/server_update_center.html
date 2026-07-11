@@ -159,6 +159,47 @@
             </div>
         </div>
     </div>
+    {% if data['server_stats']['server_type'] == "minecraft-java" %}
+    <!-- Loader (NeoForge / Forge / Fabric) version manager -->
+    <div class="row">
+        <div class="col-sm-12 grid-margin">
+            <div class="card">
+                <div class="card-body">
+                    <h4 class="card-title">Loader / Versión</h4>
+                    <p class="text-muted mb-2">
+                        Cambia el loader (NeoForge / Forge / Fabric / Vanilla…) y su versión de
+                        Minecraft. Reutiliza el instalador oficial y reescribe el comando de arranque.
+                    </p>
+                    <div class="alert alert-warning" style="font-size: .9rem;">
+                        ⚠️ El servidor debe estar <strong>detenido</strong>. Cambiar de versión de
+                        Minecraft puede afectar la compatibilidad de tu <strong>mundo</strong> y tus
+                        <strong>mods</strong> — haz una copia de seguridad antes.
+                    </div>
+                    <p class="mb-2">Actual: <span id="loader-current" class="badge badge-info">—</span></p>
+                    <div class="row">
+                        <div class="col-md-3 form-group">
+                            <label for="loader-type">Loader</label>
+                            <select id="loader-type" class="form-control"></select>
+                        </div>
+                        <div class="col-md-3 form-group">
+                            <label for="loader-version">Versión (Minecraft)</label>
+                            <select id="loader-version" class="form-control"></select>
+                        </div>
+                        <div class="col-md-3 form-group" id="loader-build-wrap" style="display:none;">
+                            <label for="loader-build">Build del loader</label>
+                            <select id="loader-build" class="form-control"></select>
+                        </div>
+                        <div class="col-md-3 form-group d-flex align-items-end">
+                            <button id="loader-change-btn" class="btn btn-outline-warning full">Cambiar
+                                versión</button>
+                        </div>
+                    </div>
+                    <div id="loader-status" class="text-muted"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% end %}
     <link rel="stylesheet" href="../../static/assets/css/partial/crafty-update-center.css">
     {% end %}
     {% block js %}
@@ -303,6 +344,182 @@
             } catch {
                 console.log("Could not find dom element for update")
             }
+        });
+
+        // ---- Loader (NeoForge / Forge / Fabric) version manager ----
+        const LOADER_LABELS = {
+            "neoforge-installer": "NeoForge",
+            "forge-installer": "Forge",
+            "fabric": "Fabric",
+            "vanilla": "Vanilla",
+            "paper": "Paper",
+            "purpur": "Purpur",
+            "folia": "Folia",
+        };
+        let loaderAvailable = {};
+        let loaderCurrent = {};
+
+        const BUILD_LOADERS = ["neoforge-installer", "forge-installer", "fabric"];
+
+        function loaderFillVersions(type) {
+            const $v = $("#loader-version");
+            $v.empty();
+            (loaderAvailable[type] || []).forEach(function (v) {
+                const label = v.loader_version ? `${v.version} (${v.loader_version})` : v.version;
+                $v.append($("<option>").val(v.version).text(label));
+            });
+            loaderFillBuilds();
+        }
+
+        async function loaderFillBuilds() {
+            const type = $("#loader-type").val();
+            const mc = $("#loader-version").val();
+            const $wrap = $("#loader-build-wrap");
+            const $b = $("#loader-build");
+            if (!BUILD_LOADERS.includes(type) || !mc) {
+                $wrap.hide();
+                $b.empty();
+                return;
+            }
+            $wrap.show();
+            $b.empty().append($("<option>").val("").text("Cargando…"));
+            try {
+                const url = `/api/v2/servers/${serverId}/loader/?builds=true`
+                    + `&loader=${encodeURIComponent(type)}&mc=${encodeURIComponent(mc)}`;
+                const res = await fetch(url, { headers: { "X-XSRFToken": getCookie("_xsrf") } });
+                const body = await res.json();
+                const builds = (body.status === "ok" && body.data.builds) ? body.data.builds : [];
+                $b.empty();
+                if (!builds.length) {
+                    $b.append($("<option>").val("").text("(última del big bucket)"));
+                    loaderUpdateBtnState();
+                    return;
+                }
+                builds.forEach(function (bd) {
+                    const label = bd.stable ? bd.build : bd.build + " (beta)";
+                    $b.append($("<option>").val(bd.build).text(label));
+                });
+            } catch (e) {
+                $b.empty().append($("<option>").val("").text("(no disponible)"));
+            }
+            loaderUpdateBtnState();
+        }
+
+        function loaderLoaderName(type) {
+            if (type === "neoforge-installer") return "neoforge";
+            if (type === "forge-installer") return "forge";
+            return type;
+        }
+
+        // The loader build the current selection would install: an explicit build
+        // if chosen, otherwise the loader_version of the selected MC version.
+        function loaderResultingBuild() {
+            if ($("#loader-build-wrap").is(":visible")) {
+                const b = $("#loader-build").val();
+                if (b) return b;
+            }
+            const type = $("#loader-type").val();
+            const mc = $("#loader-version").val();
+            const entry = (loaderAvailable[type] || []).find(function (v) {
+                return v.version === mc;
+            });
+            return entry ? entry.loader_version : null;
+        }
+
+        function loaderUpdateBtnState() {
+            const $btn = $("#loader-change-btn");
+            const cur = loaderCurrent || {};
+            const resultBuild = loaderResultingBuild();
+            const same = cur.loader && cur.version && resultBuild
+                && loaderLoaderName($("#loader-type").val()) === cur.loader
+                && String(resultBuild) === String(cur.version);
+            if (same) {
+                $btn.prop("disabled", true);
+                $("#loader-status").html('<span class="text-muted">Ya estás en '
+                    + 'esta versión — nada que cambiar.</span>');
+            } else {
+                $btn.prop("disabled", false);
+                if ($("#loader-status").text() === "Ya estás en esta versión — nada que cambiar.") {
+                    $("#loader-status").text("");
+                }
+            }
+        }
+
+        async function loaderLoad() {
+            if (!$("#loader-type").length) return;
+            try {
+                const res = await fetch(`/api/v2/servers/${serverId}/loader/`, {
+                    headers: { "X-XSRFToken": getCookie("_xsrf") },
+                });
+                const body = await res.json();
+                if (body.status !== "ok") return;
+                loaderAvailable = body.data.available || {};
+                const cur = body.data.current || {};
+                loaderCurrent = cur;
+                $("#loader-current").text((cur.loader || "—") + (cur.version ? " " + cur.version : ""));
+                const $t = $("#loader-type");
+                $t.empty();
+                Object.keys(loaderAvailable).forEach(function (type) {
+                    $t.append($("<option>").val(type).text(LOADER_LABELS[type] || type));
+                });
+                let curType = null;
+                if (cur.loader === "neoforge") curType = "neoforge-installer";
+                else if (cur.loader === "forge") curType = "forge-installer";
+                else if (loaderAvailable[cur.loader]) curType = cur.loader;
+                if (curType && loaderAvailable[curType]) $t.val(curType);
+                loaderFillVersions($t.val());
+            } catch (e) {
+                console.log("loader load failed", e);
+            }
+        }
+
+        $("#loader-type").on("change", function () {
+            loaderFillVersions($(this).val());
+        });
+
+        $("#loader-version").on("change", function () {
+            loaderFillBuilds();
+        });
+
+        $("#loader-build").on("change", function () {
+            loaderUpdateBtnState();
+        });
+
+        $("#loader-change-btn").on("click", function () {
+            const type = $("#loader-type").val();
+            const version = $("#loader-version").val();
+            if (!type || !version) return;
+            const build = $("#loader-build-wrap").is(":visible") ? $("#loader-build").val() : "";
+            const target = build ? `${LOADER_LABELS[type] || type} <strong>${build}</strong>`
+                : `${LOADER_LABELS[type] || type} (Minecraft <strong>${version}</strong>)`;
+            bootbox.confirm({
+                title: "Cambiar versión de loader",
+                message: `¿Instalar ${target}?<br><br>El servidor debe estar parado. Se reescribirá `
+                    + `el comando de arranque y se borrará la versión anterior del loader tras instalar la nueva.`,
+                callback: async function (ok) {
+                    if (!ok) return;
+                    $("#loader-status").text("Instalando… mira la consola del servidor para el progreso.");
+                    const payload = { loader_type: type, version: version };
+                    if (build) payload.build = build;
+                    const res = await fetch(`/api/v2/servers/${serverId}/loader/`, {
+                        method: "POST",
+                        body: JSON.stringify(payload),
+                        headers: { "X-XSRFToken": getCookie("_xsrf") },
+                    });
+                    const body = await res.json();
+                    if (body.status === "ok") {
+                        $("#loader-status").html('<span class="text-success">Instalación iniciada. '
+                            + 'Cuando termine, arranca el servidor.</span>');
+                    } else {
+                        $("#loader-status").text("");
+                        bootbox.alert({ title: body.error, message: body.error_data });
+                    }
+                }
+            });
+        });
+
+        $(document).ready(function () {
+            loaderLoad();
         });
     </script>
     {% end %}

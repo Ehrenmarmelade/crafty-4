@@ -50,6 +50,14 @@
                 {% raw xsrf_form_html() %}
                 <div class="row">
                   {% include "../panel/parts/big_bucket_wiz.html" %}
+                  <div class="col-sm-12" id="create-build-wrap" style="display:none;">
+                    <div class="form-group">
+                      <label for="create-build">Build del loader <small class="text-muted"> - opcional; por
+                          defecto la más reciente</small></label>
+                      <select class="form-control form-control-lg select-css" id="create-build"
+                        name="build"></select>
+                    </div>
+                  </div>
                   <div class="col-sm-12">
                     <div class="form-group">
                       <label for="server_name">{{ translate('serverWizard', 'serverName', data['lang']) }}</label>
@@ -274,7 +282,7 @@
       return value
     }
     if (key != "ignored_exits") {
-      if (typeof value == "boolean" || key === "host" || key === "version") {
+      if (typeof value == "boolean" || key === "host" || key === "version" || key === "build") {
         return value
       } else {
         return (isNaN(value) ? value : +value);
@@ -346,6 +354,7 @@
             "category": formDataObject.version.split("|")[0],
             "type": formDataObject.version.split("|")[1],
             "version": formDataObject.version.split("|")[2],
+            "build": formDataObject.build || "",
             "mem_min": formDataObject.mem_min,
             "mem_max": formDataObject.mem_max,
             "server_properties_port": formDataObject.port
@@ -360,6 +369,40 @@
       console.log(formDataJsonString);
       send_server(formDataJsonString);
     });
+
+    // ---- Loader build selector (NeoForge/Forge/Fabric) at creation ----
+    const CREATE_BUILD_LOADERS = ["neoforge-installer", "forge-installer", "fabric"];
+    async function createFillBuilds() {
+      const server_sel = document.getElementById("server");
+      const raw = server_sel ? server_sel.value : "";
+      const parts = raw.split("|"); // category|type|mcversion
+      const type = parts[1];
+      const mc = parts[2];
+      const $wrap = $("#create-build-wrap");
+      const $b = $("#create-build");
+      if (!CREATE_BUILD_LOADERS.includes(type) || !mc) {
+        $wrap.hide();
+        $b.empty();
+        return;
+      }
+      $wrap.show();
+      $b.empty().append($("<option>").val("").text("Cargando…"));
+      try {
+        const url = `/api/v2/crafty/loader_builds?loader=${encodeURIComponent(type)}&mc=${encodeURIComponent(mc)}`;
+        const res = await fetch(url, { headers: { "X-XSRFToken": getCookie("_xsrf") } });
+        const body = await res.json();
+        const builds = (body.status === "ok" && body.data.builds) ? body.data.builds : [];
+        $b.empty();
+        $b.append($("<option>").val("").text("Más reciente (por defecto)"));
+        builds.forEach(function (bd) {
+          const label = bd.stable ? bd.build : bd.build + " (beta)";
+          $b.append($("<option>").val(bd.build).text(label));
+        });
+      } catch (e) {
+        $b.empty().append($("<option>").val("").text("(no disponible)"));
+      }
+    }
+    $(document).on("change", "#server", createFillBuilds);
 
     $("#import-upload").on("submit", async function (e) {
       wait_msg(true);
