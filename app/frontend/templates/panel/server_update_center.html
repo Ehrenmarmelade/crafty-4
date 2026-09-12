@@ -165,33 +165,29 @@
         <div class="col-sm-12 grid-margin">
             <div class="card">
                 <div class="card-body">
-                    <h4 class="card-title">Loader / Versión</h4>
+                    <h4 class="card-title">{{ translate('serverUpdate', 'loaderTitle', data['lang']) }}</h4>
                     <p class="text-muted mb-2">
-                        Cambia el loader (NeoForge / Forge / Fabric / Vanilla…) y su versión de
-                        Minecraft. Reutiliza el instalador oficial y reescribe el comando de arranque.
+                        {{ translate('serverUpdate', 'loaderDesc', data['lang']) }}
                     </p>
                     <div class="alert alert-warning" style="font-size: .9rem;">
-                        ⚠️ El servidor debe estar <strong>detenido</strong>. Cambiar de versión de
-                        Minecraft puede afectar la compatibilidad de tu <strong>mundo</strong> y tus
-                        <strong>mods</strong> — haz una copia de seguridad antes.
+                        ⚠️ {% raw translate('serverUpdate', 'loaderWarning', data['lang']) %}
                     </div>
-                    <p class="mb-2">Actual: <span id="loader-current" class="badge badge-info">—</span></p>
+                    <p class="mb-2">{{ translate('serverUpdate', 'loaderCurrent', data['lang']) }}: <span id="loader-current" class="badge badge-info">—</span></p>
                     <div class="row">
                         <div class="col-md-3 form-group">
                             <label for="loader-type">Loader</label>
                             <select id="loader-type" class="form-control"></select>
                         </div>
                         <div class="col-md-3 form-group">
-                            <label for="loader-version">Versión (Minecraft)</label>
+                            <label for="loader-version">{{ translate('serverUpdate', 'loaderMcVersion', data['lang']) }}</label>
                             <select id="loader-version" class="form-control"></select>
                         </div>
                         <div class="col-md-3 form-group" id="loader-build-wrap" style="display:none;">
-                            <label for="loader-build">Build del loader</label>
+                            <label for="loader-build">{{ translate('serverUpdate', 'loaderBuild', data['lang']) }}</label>
                             <select id="loader-build" class="form-control"></select>
                         </div>
                         <div class="col-md-3 form-group d-flex align-items-end">
-                            <button id="loader-change-btn" class="btn btn-outline-warning full">Cambiar
-                                versión</button>
+                            <button id="loader-change-btn" class="btn btn-outline-warning full">{{ translate('serverUpdate', 'loaderChange', data['lang']) }}</button>
                         </div>
                     </div>
                     <div id="loader-status" class="text-muted"></div>
@@ -347,6 +343,7 @@
         });
 
         // ---- Loader (NeoForge / Forge / Fabric) version manager ----
+        const LOADER_I18N = {% raw translate('serverUpdate', 'loaderJs', data['lang']) %};
         const LOADER_LABELS = {
             "neoforge-installer": "NeoForge",
             "forge-installer": "Forge",
@@ -382,7 +379,7 @@
                 return;
             }
             $wrap.show();
-            $b.empty().append($("<option>").val("").text("Cargando…"));
+            $b.empty().append($("<option>").val("").text(LOADER_I18N.loading));
             try {
                 const url = `/api/v2/servers/${serverId}/loader/?builds=true`
                     + `&loader=${encodeURIComponent(type)}&mc=${encodeURIComponent(mc)}`;
@@ -391,7 +388,7 @@
                 const builds = (body.status === "ok" && body.data.builds) ? body.data.builds : [];
                 $b.empty();
                 if (!builds.length) {
-                    $b.append($("<option>").val("").text("(última del big bucket)"));
+                    $b.append($("<option>").val("").text(LOADER_I18N.latestBigBucket));
                     loaderUpdateBtnState();
                     return;
                 }
@@ -435,11 +432,10 @@
                 && String(resultBuild) === String(cur.version);
             if (same) {
                 $btn.prop("disabled", true);
-                $("#loader-status").html('<span class="text-muted">Ya estás en '
-                    + 'esta versión — nada que cambiar.</span>');
+                $("#loader-status").html(`<span class="text-muted">${LOADER_I18N.alreadyOn}</span>`);
             } else {
                 $btn.prop("disabled", false);
-                if ($("#loader-status").text() === "Ya estás en esta versión — nada que cambiar.") {
+                if ($("#loader-status").text() === LOADER_I18N.alreadyOn) {
                     $("#loader-status").text("");
                 }
             }
@@ -493,12 +489,11 @@
             const target = build ? `${LOADER_LABELS[type] || type} <strong>${build}</strong>`
                 : `${LOADER_LABELS[type] || type} (Minecraft <strong>${version}</strong>)`;
             bootbox.confirm({
-                title: "Cambiar versión de loader",
-                message: `¿Instalar ${target}?<br><br>El servidor debe estar parado. Se reescribirá `
-                    + `el comando de arranque y se borrará la versión anterior del loader tras instalar la nueva.`,
+                title: LOADER_I18N.confirmTitle,
+                message: LOADER_I18N.confirmInstall.replace("{target}", target) + "<br><br>" + LOADER_I18N.confirmBody,
                 callback: async function (ok) {
                     if (!ok) return;
-                    $("#loader-status").text("Instalando… mira la consola del servidor para el progreso.");
+                    $("#loader-status").text(LOADER_I18N.installing);
                     const payload = { loader_type: type, version: version };
                     if (build) payload.build = build;
                     const res = await fetch(`/api/v2/servers/${serverId}/loader/`, {
@@ -508,8 +503,7 @@
                     });
                     const body = await res.json();
                     if (body.status === "ok") {
-                        $("#loader-status").html('<span class="text-success">Instalación iniciada. '
-                            + 'Cuando termine, arranca el servidor.</span>');
+                        $("#loader-status").html(`<span class="text-success">${LOADER_I18N.started}</span>`);
                     } else {
                         $("#loader-status").text("");
                         bootbox.alert({ title: body.error, message: body.error_data });

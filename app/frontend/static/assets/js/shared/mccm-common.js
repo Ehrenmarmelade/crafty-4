@@ -1,5 +1,12 @@
-/* ===== Content manager - lógica compartida (Content + Add content) ===== */
+/* ===== Content manager - shared logic (Installed + Add content + wizard) ===== */
 const MCCM_SERVER_ID = window.MCCM_SERVER_ID;
+
+// UI strings come from serverContent.js in the translation file, injected by
+// the template as window.MCCM_I18N before this script loads.
+function mccmT(key, vars) {
+    const T = window.MCCM_I18N || {};
+    return (T[key] || key).replace(/\{(\w+)\}/g, (m, v) => (vars && v in vars ? vars[v] : m));
+}
 
 function mccmCookie(name) {
     const v = document.cookie.match('(^|;)\\s*' + name + '\\s*=\\s*([^;]+)');
@@ -29,7 +36,7 @@ function mccmVerType(t) {
     return `<span class="badge badge-${c}">${t || '?'}</span>`;
 }
 
-// modal inyectado una vez (sirve para ambas pestañas)
+// modal injected once (shared by both tabs and the wizard)
 (function ensureModal() {
     if (document.getElementById('mccm-modal')) return;
     const d = document.createElement('div');
@@ -52,11 +59,11 @@ function mccmGameCell(gvs) {
 }
 async function mccmOpenDetail(source, ident, currentFile, ptype) {
     ptype = ptype || 'mod';
-    if (!ident) { mccmStatus('Este contenido no está identificado, no hay ficha.'); return; }
+    if (!ident) { mccmStatus(mccmT('noDetail')); return; }
     const modal = document.getElementById('mccm-modal');
     const body = document.getElementById('mccm-modal-body');
     modal.style.display = 'flex';
-    body.innerHTML = '<div class="text-muted">Cargando ficha...</div>';
+    body.innerHTML = `<div class="text-muted">${mccmT('loadingDetails')}</div>`;
     const [dRes, vRes] = await Promise.all([
         mccmApi({ action: 'detail', source: source, id: ident }),
         mccmApi({ action: 'versions', source: source, id: ident, type: ptype })
@@ -69,7 +76,7 @@ function mccmRenderDetail(body, d, vs, src, ident, file, allChecked, ptype) {
         `<tr><td>${mccmVerType(v.type)}</td><td>${esc(v.name)}</td>` +
         `<td>${mccmGameCell(v.game_versions)}</td>` +
         `<td class="text-muted">${(v.date || '').slice(0, 10)}</td>` +
-        `<td><button class="btn btn-sm btn-outline-primary mccm-instver" data-src="${src}" data-id="${esc(String(ident))}" data-ver="${esc(String(v.id))}" data-file="${esc(file)}" data-type="${esc(ptype)}">Instalar</button></td></tr>`
+        `<td><button class="btn btn-sm btn-outline-primary mccm-instver" data-src="${src}" data-id="${esc(String(ident))}" data-ver="${esc(String(v.id))}" data-file="${esc(file)}" data-type="${esc(ptype)}">${mccmT('install')}</button></td></tr>`
     ).join('');
     const cats = (d.categories || []).join(', ');
     const dl = (d.downloads || 0).toLocaleString();
@@ -77,13 +84,13 @@ function mccmRenderDetail(body, d, vs, src, ident, file, allChecked, ptype) {
         `<div style="display:flex;gap:14px;align-items:center">` +
         (d.icon ? `<img src="${esc(d.icon)}" width="56" height="56" style="border-radius:8px">` : '') +
         `<div><h4 style="margin:0">${esc(d.title || file || 'Mod')}</h4>` +
-        `<div class="text-muted">${d.author ? 'por ' + esc(d.author) + ' · ' : ''}${dl} descargas · ${badge(src)}</div></div></div>` +
+        `<div class="text-muted">${d.author ? mccmT('by') + ' ' + esc(d.author) + ' · ' : ''}${dl} ${mccmT('downloads')} · ${badge(src)}</div></div></div>` +
         `<p class="mt-2">${esc(d.summary || '')}</p>` +
-        `<div class="text-muted small">${cats ? 'Categorías: ' + esc(cats) + ' · ' : ''}${d.url ? `<a href="${esc(d.url)}" target="_blank" rel="noopener">Ver ficha completa ↗</a>` : ''}</div>` +
-        `<hr><div class="d-flex justify-content-between align-items-center"><h6 class="mb-0">Versiones (${vs.length})</h6>` +
-        `<label class="small text-muted mb-0" style="cursor:pointer"><input type="checkbox" id="mccm-allver" ${allChecked ? 'checked' : ''}> mostrar todas (incl. incompatibles)</label></div>` +
-        `<div style="max-height:320px;overflow:auto" class="mt-2"><table class="table table-sm"><thead><tr><th>Tipo</th><th>Versión</th><th>Juego</th><th>Fecha</th><th></th></tr></thead>` +
-        `<tbody>${verRows || '<tr><td colspan="5" class="text-muted">Sin versiones para este filtro.</td></tr>'}</tbody></table></div>`;
+        `<div class="text-muted small">${cats ? mccmT('categories') + ': ' + esc(cats) + ' · ' : ''}${d.url ? `<a href="${esc(d.url)}" target="_blank" rel="noopener">${mccmT('openProjectPage')} ↗</a>` : ''}</div>` +
+        `<hr><div class="d-flex justify-content-between align-items-center"><h6 class="mb-0">${mccmT('versions')} (${vs.length})</h6>` +
+        `<label class="small text-muted mb-0" style="cursor:pointer"><input type="checkbox" id="mccm-allver" ${allChecked ? 'checked' : ''}> ${mccmT('showAllVersions')}</label></div>` +
+        `<div style="max-height:320px;overflow:auto" class="mt-2"><table class="table table-sm"><thead><tr><th>${mccmT('typeCol')}</th><th>${mccmT('versionCol')}</th><th>${mccmT('mcCol')}</th><th>${mccmT('dateCol')}</th><th></th></tr></thead>` +
+        `<tbody>${verRows || `<tr><td colspan="5" class="text-muted">${mccmT('noVersionsForFilter')}</td></tr>`}</tbody></table></div>`;
     document.querySelectorAll('.mccm-instver').forEach(b => b.onclick = mccmInstallVersion);
     const allChk = document.getElementById('mccm-allver');
     if (allChk) allChk.onchange = async () => {
@@ -93,16 +100,16 @@ function mccmRenderDetail(body, d, vs, src, ident, file, allChecked, ptype) {
 }
 async function mccmInstallVersion(e) {
     const b = e.currentTarget;
-    b.disabled = true; b.textContent = 'Instalando...';
+    b.disabled = true; b.textContent = mccmT('installing');
     const r = await mccmApi({ action: 'install_version', source: b.dataset.src, id: b.dataset.id, version_id: b.dataset.ver, current_filename: b.dataset.file || null, type: b.dataset.type || 'mod' });
     if (r.status === 'ok' && r.data && r.data.ok) {
-        mccmStatus('Instalado: ' + (r.data.new || '') + '.');
+        mccmStatus(mccmT('installedMsg', { file: r.data.new || '' }));
         document.getElementById('mccm-modal').style.display = 'none';
         if (window.mccmAfterInstall) window.mccmAfterInstall({
             filename: r.data.new, type: b.dataset.type || 'mod', old: b.dataset.file || null
         });
     } else {
-        b.disabled = false; b.textContent = 'Instalar';
-        mccmStatus('No se pudo instalar: ' + ((r.data && r.data.reason) || r.error || 'error'));
+        b.disabled = false; b.textContent = mccmT('install');
+        mccmStatus(mccmT('installFailed', { reason: (r.data && r.data.reason) || r.error || 'error' }));
     }
 }

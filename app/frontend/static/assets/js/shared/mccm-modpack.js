@@ -12,10 +12,7 @@
  * });
  */
 window.MccmModpack = (function () {
-    const T = window.MCCM_I18N || {};
-    function t(key, vars) {
-        return (T[key] || key).replace(/\{(\w+)\}/g, (m, v) => (vars && v in vars ? vars[v] : m));
-    }
+    const t = mccmT;
     let cfg = { api: null, mode: 'server', onSelect: null, progressEl: null, onDone: null };
     let pollTimer = null;
 

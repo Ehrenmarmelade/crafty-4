@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-register_existing.py - Registra un servidor YA EXISTENTE en Crafty apuntando a su
-carpeta real, SIN copiar archivos (no duplica el world). Reutiliza el propio
-register_server() de Crafty. Ejecutar con Crafty PARADO.
+register_existing.py - Register an ALREADY EXISTING server in Crafty, pointing at
+its real folder WITHOUT copying files (no duplicated world). Reuses Crafty's own
+register_server(). Run with Crafty STOPPED. (Fork author's dev helper: assumes a
+NeoForge server with a portable JRE on Windows.)
 
-Uso:  .venv\\Scripts\\python.exe register_existing.py "D:\\Minecraft" "Cobblemon Server"
+Usage:  .venv\\Scripts\\python.exe register_existing.py "D:\\Minecraft" "Cobblemon Server"
 """
 
 import os
@@ -38,10 +39,10 @@ file_helper = FileHelpers(helper)
 import_helper = ImportHelpers(helper, file_helper)
 controller = Controller(database, helper, file_helper, import_helper)
 
-# --- usuario admin (superuser -> verá el servidor) ---
+# --- admin user (superuser -> will see the server) ---
 uid = controller.users_helper.get_user_id_by_name("admin") or 1
 
-# --- comando de arranque NeoForge (autodetecta versión y usa el JRE portable) ---
+# --- NeoForge start command (autodetects the version, uses the portable JRE) ---
 neo_base = os.path.join(SERVER_DIR, "libraries", "net", "neoforged", "neoforge")
 ver = sorted(os.listdir(neo_base))[-1]
 java = os.path.join(SERVER_DIR, "jre", "bin", "java.exe")
@@ -51,17 +52,17 @@ cmd = (
     f"@libraries/net/neoforged/neoforge/{ver}/win_args.txt nogui"
 )
 
-print(f"Servidor : {SERVER_DIR}")
+print(f"Server   : {SERVER_DIR}")
 print(f"NeoForge : {ver}")
-print(f"Comando  : {cmd}")
+print(f"Command  : {cmd}")
 print(f"admin uid: {uid}")
 
-# --- ¿ya está registrado? (evita duplicados) ---
+# --- already registered? (avoid duplicates) ---
 from app.classes.models.servers import Servers
 
 existing = [s.server_name for s in Servers.select().where(Servers.path == SERVER_DIR)]
 if existing:
-    print(f"YA registrado como: {existing}. No hago nada.")
+    print(f"ALREADY registered as: {existing}. Nothing to do.")
     sys.exit(0)
 
 new_id = controller.register_server(
@@ -76,8 +77,8 @@ new_id = controller.register_server(
     created_by=uid,
     server_type="minecraft-java",
 )
-print(f"REGISTRADO. server_id = {new_id}")
+print(f"REGISTERED. server_id = {new_id}")
 
-# verificación directa en BD
+# direct DB verification
 row = Servers.select().where(Servers.server_id == new_id).first()
-print(f"Verificación BD -> name={row.server_name} path={row.path}")
+print(f"DB check -> name={row.server_name} path={row.path}")

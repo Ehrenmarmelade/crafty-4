@@ -52,8 +52,7 @@
                   {% include "../panel/parts/big_bucket_wiz.html" %}
                   <div class="col-sm-12" id="create-build-wrap" style="display:none;">
                     <div class="form-group">
-                      <label for="create-build">Build del loader <small class="text-muted"> - opcional; por
-                          defecto la más reciente</small></label>
+                      <label for="create-build">{{ translate('serverWizard', 'loaderBuild', data['lang']) }} <small class="text-muted"> - {{ translate('serverWizard', 'loaderBuildOptional', data['lang']) }}</small></label>
                       <select class="form-control form-control-lg select-css" id="create-build"
                         name="build"></select>
                     </div>
@@ -486,14 +485,14 @@
         return;
       }
       $wrap.show();
-      $b.empty().append($("<option>").val("").text("Cargando…"));
+      $b.empty().append($("<option>").val("").text("{{ translate('serverWizard', 'loading', data['lang']) }}"));
       try {
         const url = `/api/v2/crafty/loader_builds?loader=${encodeURIComponent(type)}&mc=${encodeURIComponent(mc)}`;
         const res = await fetch(url, { headers: { "X-XSRFToken": getCookie("_xsrf") } });
         const body = await res.json();
         const builds = (body.status === "ok" && body.data.builds) ? body.data.builds : [];
         $b.empty();
-        $b.append($("<option>").val("").text("Más reciente (por defecto)"));
+        $b.append($("<option>").val("").text("{{ translate('serverWizard', 'latestDefault', data['lang']) }}"));
         builds.forEach(function (bd) {
           const label = bd.stable ? bd.build : bd.build + " (beta)";
           $b.append($("<option>").val(bd.build).text(label));
@@ -604,10 +603,10 @@
 </script>
 <script src="../../static/assets/js/shared/bootstrap-select-1.13.18.js"></script>
 {% if data["online"] %}
-<script src="/static/assets/js/shared/mccm-common.js"></script>
 <script>
   window.MCCM_I18N = {% raw translate('serverContent', 'js', data['lang']) %};
 </script>
+<script src="/static/assets/js/shared/mccm-common.js"></script>
 <script src="/static/assets/js/shared/mccm-modpack.js"></script>
 <script>
   // ---- Create server from modpack ----

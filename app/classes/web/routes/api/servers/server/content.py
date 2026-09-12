@@ -70,7 +70,7 @@ def _get_cf_key():
 
 class ApiServersServerContentHandler(BaseApiHandler):
     """
-    Gestión de contenido (mods/packs) de un servidor.
+    Content management (mods/packs/modpacks) for one server.
 
     POST /api/v2/servers/<id>/content   body: {"action": ...}
       action=scan                                -> inventario unificado
@@ -117,8 +117,8 @@ class ApiServersServerContentHandler(BaseApiHandler):
 
         cm = ContentManager(
             server_path=server["path"],
-            mc=data.get("mc"),  # None -> autodetecta del servidor
-            loader=data.get("loader"),  # None -> autodetecta del servidor
+            mc=data.get("mc"),  # None -> autodetect from the server
+            loader=data.get("loader"),  # None -> autodetect from the server
             cf_key=_get_cf_key(),
         )
 
@@ -139,8 +139,8 @@ class ApiServersServerContentHandler(BaseApiHandler):
         action = data.get("action", "scan")
         loop = IOLoop.current()
 
-        # Ejecuta el trabajo bloqueante (red/disco) en un hilo para NO congelar
-        # el IOLoop de Tornado (y con él, todo el panel) durante escaneos largos.
+        # Run blocking work (network/disk) in a thread so long scans do NOT
+        # freeze Tornado's IOLoop (and with it the whole panel).
         async def run(fn, *args):
             return await loop.run_in_executor(None, fn, *args)
 

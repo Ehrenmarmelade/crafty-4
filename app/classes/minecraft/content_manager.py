@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-content_manager.py - Motor de gestión de contenido (mods/packs) para Crafty.
+content_manager.py - content engine (mods/packs/modpacks) for Crafty.
 
-Autocontenido (solo stdlib). Identifica mods por hash en Modrinth (sha1) y
-CurseForge (murmur2 fingerprint), calcula updates para la version de MC + loader
-del servidor, y aplica actualizaciones con verificación de hash + backup.
+Self-contained (stdlib only). Identifies mods by hash on Modrinth (sha1) and
+CurseForge (murmur2 fingerprint), works out updates for the server's MC
+version + loader, and applies them with hash verification + backup.
 
-Fuente: Modrinth primero, CurseForge como fallback (su buscador de texto está
-capado para keys estándar, así que el descubrimiento va por Modrinth).
+Source order: Modrinth first, CurseForge as fallback (its text search is
+restricted for standard API keys, so discovery goes through Modrinth).
 """
 
 import os, json, time, hashlib
@@ -121,7 +121,7 @@ FOLDER_BY_TYPE = {
     "shader": "shaderpacks",
     "datapack": os.path.join("world", "datapacks"),
 }
-# (content_type, extensión) que se escanean en cada carpeta
+# (content_type, extension) scanned in each folder
 SCAN_TYPES = [
     ("mod", ".jar"),
     ("resourcepack", ".zip"),
@@ -137,7 +137,7 @@ class ContentManager:
         self.cache_dir = os.path.join(server_path, ".content_cache")
         self.cache_file = os.path.join(self.cache_dir, "inventory.json")
         self.cf_key = cf_key
-        # Autodetecta MC/loader del servidor si no se pasan explícitos.
+        # Autodetect the server's MC/loader unless passed in explicitly.
         dmc, dloader = self._autodetect()
         # True when the context is real (passed in or found on disk) instead of
         # the historical defaults below; modpack search only filters when it is.
@@ -159,13 +159,13 @@ class ContentManager:
             self.lt = CF_LOADER.get(self.loader, 6)
 
     def _autodetect(self):
-        """Deduce (mc, loader) mirando libraries/ del servidor."""
+        """Infer (mc, loader) from the server's libraries/ folder."""
         net = os.path.join(self.server_path, "libraries", "net")
         neo = os.path.join(net, "neoforged", "neoforge")
         if os.path.isdir(neo):
             vers = sorted(os.listdir(neo))
             if vers:
-                p = vers[-1].split(".")  # p.ej. 21.1.235 -> 1.21.1  (21.0.x -> 1.21)
+                p = vers[-1].split(".")  # e.g. 21.1.235 -> 1.21.1  (21.0.x -> 1.21)
                 if len(p) >= 2:
                     mc = f"1.{p[0]}" if p[1] == "0" else f"1.{p[0]}.{p[1]}"
                     return mc, "neoforge"
@@ -235,7 +235,7 @@ class ContentManager:
             body={"hashes": sha1s, "algorithm": "sha1"},
         )
         ident = ident if isinstance(ident, dict) else {}
-        # updates: mods filtran por loader; packs/shaders/datapacks solo por versión MC
+        # updates: mods filter by loader; packs/shaders/datapacks only by MC version
         mod_sha = [s for s in sha1s if inv[sha_to[s]]["content_type"] == "mod"]
         pack_sha = [s for s in sha1s if inv[sha_to[s]]["content_type"] != "mod"]
         upd = {}
@@ -302,7 +302,7 @@ class ContentManager:
                 rec["latest"] = pf.get("filename")
                 rec["update"] = pf.get("hashes", {}).get("sha1") != sha1
 
-        # CF fingerprint solo para MODS no identificados
+        # CF fingerprint lookup only for still-unidentified MODS
         unknown = [
             n
             for n, r in inv.items()
@@ -411,8 +411,8 @@ class ContentManager:
         }
 
     def scan_one(self, filename, content_type="mod"):
-        """Escanea un único archivo (rápido) y devuelve su registro — para
-        refrescar la UI de forma reactiva tras instalar/actualizar."""
+        """Scan a single file (fast) and return its record, so the UI can
+        refresh reactively after an install/update."""
         folder = self._folder(content_type)
         if not filename or not os.path.exists(os.path.join(folder, filename)):
             return None
@@ -577,7 +577,7 @@ class ContentManager:
             results.append({"name": p["name"], "ok": True, "newname": p["newname"]})
         return {"backup": backup, "results": results}
 
-    # ---------- acciones por fila (conscientes de la carpeta según content_type) ----------
+    # ---------- per-row actions (folder chosen by content_type) ----------
     def toggle(self, filename, content_type="mod"):
         folder = self._folder(content_type)
         src = os.path.join(folder, filename)
@@ -685,7 +685,7 @@ class ContentManager:
         _, r = _http_json(f"{MODRINTH}/search?" + urllib.parse.urlencode(params))
         return r.get("hits", []) if isinstance(r, dict) else []
 
-    # ---------- install (añadir nuevo desde Modrinth) ----------
+    # ---------- install (add new content from Modrinth) ----------
     def install(self, identifier, project_type="mod", channel="release"):
         if not identifier:
             return {"ok": False, "reason": "missing_identifier"}
@@ -708,7 +708,7 @@ class ContentManager:
         if not good:
             return {"ok": False, "reason": "hash_mismatch"}
         installed = [pf["filename"]]
-        # dependencias requeridas (solo para mods, van a mods/)
+        # required dependencies (mods only, they go to mods/)
         for d in best.get("dependencies", []):
             if d.get("dependency_type") == "required" and d.get("project_id"):
                 db = self._mr_best(d["project_id"], allowed)
@@ -743,7 +743,7 @@ class ContentManager:
         vs.sort(key=lambda v: v.get("date_published", ""), reverse=True)
         return vs[0] if vs else None
 
-    # ---------- ficha detallada + versiones ----------
+    # ---------- detail card + versions ----------
     def detail(self, source, ident):
         if source == "modrinth":
             _, p = _http_json(f"{MODRINTH}/project/{ident}")
@@ -794,7 +794,7 @@ class ContentManager:
             elif project_type == "mod":
                 lo = urllib.parse.quote(json.dumps([self.loader]))
                 url = f"{MODRINTH}/project/{ident}/version?loaders={lo}&game_versions={gv}"
-            else:  # resourcepack/shader/datapack: NO se filtra por loader de mods
+            else:  # resourcepack/shader/datapack: do NOT filter by mod loader
                 url = f"{MODRINTH}/project/{ident}/version?game_versions={gv}"
             _, vs = _http_json(url)
             for v in vs or []:
