@@ -8,6 +8,9 @@ services:
     restart: always
     environment:
       - TZ=Etc/UTC
+      # Optional: needed for CurseForge modpacks / CurseForge-only mods
+      # (Modrinth works without it). Get a key at https://console.curseforge.com
+      # - CURSEFORGE_API_KEY=your_key_here
     ports:
       - "5520-5550:5520-5550/udp" # Hytale
       - "8000:8000" # HTTP

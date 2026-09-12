@@ -24,3 +24,16 @@ CONTRIBUTING.md
 DBCHANGES.md
 README.md
 sonar-project.properties
+
+# runtime data & generated config — must never end up in the image
+servers/
+backups/
+logs/
+import/
+temp/
+app/config/db/
+app/config/config.json
+app/config/default-creds.txt
+app/config/content.json
+app/config/bigbucket.json
+**/.content_cache/
