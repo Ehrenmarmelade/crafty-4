@@ -132,6 +132,17 @@ class ContentManager:
         self.loader = (loader or dloader or "neoforge").lower()
         self.lt = CF_LOADER.get(self.loader, 6)
 
+    def apply_hints(self, mc=None, loader=None):
+        """Fill in MC/loader from an external source (Crafty's server record)
+        only where on-disk detection found nothing."""
+        if mc and not self.mc_detected:
+            self.mc = mc
+            self.mc_detected = True
+        if loader and not self.loader_detected and loader in SERVER_LOADERS:
+            self.loader = loader.lower()
+            self.loader_detected = True
+            self.lt = CF_LOADER.get(self.loader, 6)
+
     def _autodetect(self):
         """Deduce (mc, loader) mirando libraries/ del servidor."""
         net = os.path.join(self.server_path, "libraries", "net")

@@ -132,6 +132,18 @@ class ApiServersServerContentHandler(BaseApiHandler):
             cf_key=_get_cf_key(),
         )
 
+        # Fresh servers have no libraries/ yet; fall back to what Crafty knows
+        # from the execution command (loader, and MC version for installers).
+        try:
+            hint = self.controller.detect_server_loader(server_id) or {}
+        except Exception:  # pylint: disable=broad-except
+            hint = {}
+        hint_ver = str(hint.get("version") or "")
+        cm.apply_hints(
+            mc=hint_ver if hint_ver.startswith("1.") else None,
+            loader=hint.get("loader"),
+        )
+
         action = data.get("action", "scan")
         loop = IOLoop.current()
 
