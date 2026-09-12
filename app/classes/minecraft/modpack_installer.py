@@ -21,6 +21,7 @@ import shutil
 import tempfile
 import time
 import urllib.parse
+import uuid
 import zipfile
 from dataclasses import asdict, dataclass, field
 from pathlib import PurePosixPath, Path
@@ -53,6 +54,29 @@ MRPACK_LOADER_KEYS = {
     "neoforge": "neoforge",
     "quilt-loader": "quilt",
 }
+
+
+# Packs resolved by the wizard before a server exists, keyed by token so the
+# create-server call can reuse the downloaded archive.
+_RESOLVED_PACKS = {}
+_RESOLVED_TTL = 3600
+
+
+def remember_pack(pack):
+    token = uuid.uuid4().hex
+    now = time.time()
+    for key, (ts, _) in list(_RESOLVED_PACKS.items()):
+        if now - ts > _RESOLVED_TTL:
+            _RESOLVED_PACKS.pop(key, None)
+    _RESOLVED_PACKS[token] = (now, pack.to_dict())
+    return token
+
+
+def recall_pack(token):
+    entry = _RESOLVED_PACKS.pop(token, None) if token else None
+    if not entry or time.time() - entry[0] > _RESOLVED_TTL:
+        return None
+    return PackInfo.from_dict(entry[1])
 
 
 class ModpackError(Exception):

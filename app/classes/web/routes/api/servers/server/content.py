@@ -7,7 +7,7 @@ from tornado.ioloop import IOLoop
 
 from app.classes.models.server_permissions import EnumPermissionsServer
 from app.classes.web.base_api_handler import BaseApiHandler
-from app.classes.minecraft.content_manager import ContentManager
+from app.classes.minecraft.content_manager import ContentManager, get_cf_key
 from app.classes.minecraft.modpack_installer import (
     ModpackError,
     ModpackInstaller,
@@ -64,18 +64,7 @@ def _t_modpack_install(server_id, server_path, cf_key, pack_dict, mode):
 
 
 def _get_cf_key():
-    """CurseForge API key: variable de entorno o app/config/content.json."""
-    key = os.environ.get("CURSEFORGE_API_KEY", "")
-    if key:
-        return key
-    cfg_path = os.path.join("app", "config", "content.json")
-    if os.path.exists(cfg_path):
-        try:
-            with open(cfg_path, encoding="utf-8") as f:
-                return json.load(f).get("curseforge_api_key", "")
-        except (OSError, json.JSONDecodeError):
-            return ""
-    return ""
+    return get_cf_key()
 
 
 class ApiServersServerContentHandler(BaseApiHandler):

@@ -26,6 +26,21 @@ CF_RELEASETYPE = {1: "release", 2: "beta", 3: "alpha"}
 CHANNEL_RANK = {"release": 0, "beta": 1, "alpha": 2}
 
 
+def get_cf_key():
+    """CurseForge API key: env var CURSEFORGE_API_KEY, else app/config/content.json."""
+    key = os.environ.get("CURSEFORGE_API_KEY", "")
+    if key:
+        return key
+    cfg_path = os.path.join("app", "config", "content.json")
+    if os.path.exists(cfg_path):
+        try:
+            with open(cfg_path, encoding="utf-8") as f:
+                return json.load(f).get("curseforge_api_key", "")
+        except (OSError, json.JSONDecodeError):
+            return ""
+    return ""
+
+
 def channels_allowed(channel):
     rank = CHANNEL_RANK.get(channel, 0)
     return {c for c, r in CHANNEL_RANK.items() if r <= rank}

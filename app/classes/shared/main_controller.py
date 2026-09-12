@@ -2,6 +2,7 @@ import os
 import re
 import sys
 import pathlib
+import shutil
 import requests
 from xml.etree import ElementTree
 from pathlib import Path
@@ -42,6 +43,12 @@ from app.classes.helpers.file_helpers import FileHelpers
 from app.classes.shared.import_helper import ImportHelpers
 from app.classes.big_bucket.bigbucket import BigBucket
 from app.classes.shared.websocket_manager import WebSocketManager
+from app.classes.minecraft.content_manager import get_cf_key
+from app.classes.minecraft.modpack_installer import (
+    ModpackInstaller,
+    PackInfo,
+    recall_pack,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -424,6 +431,15 @@ class Controller:
 
         server_file = "server.jar"  # HACK: Throw this horrible default out of here
         root_create_data = data[data["create_type"] + "_create_data"]
+        modpack = None
+        if (
+            data["create_type"] == "minecraft_java"
+            and root_create_data["create_type"] == "modpack"
+        ):
+            # Resolve the pack first: its MC version + loader decide the jar
+            # type, so from here on this is a normal download_jar creation
+            # whose loader install is followed by the pack install.
+            modpack = self._prepare_modpack_create(root_create_data)
         create_data = root_create_data[root_create_data["create_type"] + "_create_data"]
 
         monitoring_port = 25565
@@ -608,7 +624,21 @@ class Controller:
             backup_path,
         )
         if data["create_type"] == "minecraft_java":
-            if root_create_data["create_type"] == "download_jar":
+            if modpack is not None:
+                threading.Thread(
+                    target=self._t_create_modpack_server,
+                    name=f"create_modpack-{new_server_id}",
+                    daemon=True,
+                    args=(
+                        new_server_id,
+                        new_server_path,
+                        create_data["type"],
+                        create_data["version"],
+                        create_data["build"],
+                        modpack.to_dict(),
+                    ),
+                ).start()
+            elif root_create_data["create_type"] == "download_jar":
                 build = create_data.get("build")
                 if build and create_data["type"] in (
                     "neoforge-installer",
@@ -1436,6 +1466,122 @@ class Controller:
         except Exception:
             logger.exception("Failed to fetch fabric installer version")
             return None
+
+    # ------------------------------------------------------------ modpacks
+    MODPACK_JAR_TYPES = {
+        "fabric": "fabric",
+        "forge": "forge-installer",
+        "neoforge": "neoforge-installer",
+    }
+
+    def _prepare_modpack_create(self, root_create_data):
+        """Resolve the pack behind a create_type=modpack request and rewrite
+        the request into the equivalent download_jar one. Returns the
+        PackInfo to install once the loader is in place."""
+        mp = root_create_data["modpack_create_data"]
+        pack = recall_pack(mp.get("pack_token"))
+        if pack is None:
+            installer = ModpackInstaller(None, cf_key=get_cf_key())
+            if mp.get("source") == "upload":
+                upload_dir = Path(self.project_root, "import", "upload")
+                archive = self.helper.validate_traversal(
+                    upload_dir, mp.get("archive_name", "")
+                )
+                pack = installer.resolve_archive(str(archive))
+            else:
+                pack = installer.resolve(
+                    mp.get("source"), mp.get("project_id"), mp.get("version_id")
+                )
+        jar_type = self.MODPACK_JAR_TYPES.get(pack.loader)
+        if not jar_type:
+            raise ValueError(f"Unsupported modpack loader: {pack.loader}")
+        build = mp.get("loader_build") or pack.loader_build
+        if not build:
+            raise ValueError("Modpack does not declare a loader build")
+        if pack.loader == "forge" and not build.startswith(pack.mc + "-"):
+            # Forge maven coordinates are <mc>-<build>
+            build = f"{pack.mc}-{build}"
+        root_create_data["create_type"] = "download_jar"
+        root_create_data["download_jar_create_data"] = {
+            "category": "mc_java_servers",
+            "type": jar_type,
+            "version": pack.mc,
+            "build": build,
+            "mem_min": mp["mem_min"],
+            "mem_max": mp["mem_max"],
+            "server_properties_port": mp["server_properties_port"],
+            "agree_to_eula": bool(mp.get("agree_to_eula", False)),
+        }
+        return pack
+
+    def _t_create_modpack_server(
+        self, server_id, server_path, loader_type, version, build, pack_dict
+    ):
+        """Thread target: install the loader build the pack asks for, then the
+        pack's files + overrides, all under the import status."""
+        pack = PackInfo.from_dict(pack_dict)
+        installer = ModpackInstaller(server_path, cf_key=get_cf_key())
+        try:
+            ServersController.set_import(server_id)
+            installer.write_status(
+                server_path,
+                {
+                    "status": "resolving",
+                    "name": pack.name,
+                    "current": f"{loader_type} {build}",
+                    "errors": [],
+                },
+            )
+            server_obj = self.servers.get_server_obj(server_id)
+            xms, xmx = self._extract_memory(server_obj.execution_command)
+            if loader_type in MODDED_TYPES:
+                ok = self._install_modded_build(
+                    server_obj, server_path, server_id, loader_type, build, xms, xmx
+                )
+            else:
+                ok = self._install_fabric_build(
+                    server_obj, server_path, version, build, xms, xmx
+                )
+            if not ok:
+                logger.error(
+                    f"Loader {loader_type} {build} failed to install for modpack "
+                    f"server {server_id}; skipping pack install"
+                )
+                installer.write_status(
+                    server_path,
+                    {"status": "error", "error": "loader_install_failed", "errors": []},
+                )
+                return
+            if not pack.archive_path or not os.path.exists(pack.archive_path):
+                pack = installer.resolve(pack.source, pack.project_id, pack.version_id)
+            result = installer.install(pack, mode="merge")
+            logger.info(
+                f"Modpack '{pack.name}' installed into new server {server_id}: "
+                f"{len(result['installed'])} files, {len(result['errors'])} errors"
+            )
+        except Exception:
+            logger.exception("Failed to create server from modpack")
+            installer.write_status(
+                server_path,
+                {"status": "error", "error": "internal_error", "errors": []},
+            )
+        finally:
+            self._discard_pack_archive(pack)
+            ServersController.finish_import(server_id)
+            WebSocketManager().broadcast_to_server_users(
+                server_id, "send_start_reload", {}
+            )
+
+    @staticmethod
+    def _discard_pack_archive(pack):
+        """Remove archives the wizard downloaded into a temp dir; leave user
+        uploads in import/upload alone."""
+        ap = pack.archive_path
+        if not ap or not os.path.exists(ap):
+            return
+        parent = os.path.dirname(ap)
+        if os.path.basename(parent).startswith("crafty-modpack-"):
+            shutil.rmtree(parent, ignore_errors=True)
 
     def _t_create_loader_build(
         self, server_id, server_path, loader_type, version, build

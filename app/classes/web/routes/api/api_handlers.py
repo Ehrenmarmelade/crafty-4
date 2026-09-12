@@ -27,6 +27,7 @@ from app.classes.web.routes.api.servers.server.loader import (
 from app.classes.web.routes.api.crafty.loader_builds import (
     ApiCraftyLoaderBuildsHandler,
 )
+from app.classes.web.routes.api.crafty.modpack import ApiCraftyModpackHandler
 from app.classes.web.routes.api.servers.server.index import (
     ApiServersServerIndexHandler,
     ApiServersServerUpdateConfig,
@@ -342,6 +343,11 @@ def api_handlers(handler_args):
         (
             r"/api/v2/crafty/loader_builds/?",
             ApiCraftyLoaderBuildsHandler,
+            handler_args,
+        ),
+        (
+            r"/api/v2/crafty/modpack/?",
+            ApiCraftyModpackHandler,
             handler_args,
         ),
         (

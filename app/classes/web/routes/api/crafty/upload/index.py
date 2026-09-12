@@ -1,3 +1,4 @@
+import mimetypes
 import os
 import logging
 import shutil
@@ -35,10 +36,14 @@ IMAGE_MIME_TYPES = [
     "image/webp",
 ]
 
+MRPACK_MIME_TYPE = "application/x-modrinth-modpack+zip"
+# .mrpack is a zip; Python's mimetypes does not know the extension.
+mimetypes.add_type(MRPACK_MIME_TYPE, ".mrpack")
 ARCHIVE_MIME_TYPES = [
     "application/zip",
     "application/x-zip-compressed",
     "application/octet-stream",
+    MRPACK_MIME_TYPE,
 ]
 
 
