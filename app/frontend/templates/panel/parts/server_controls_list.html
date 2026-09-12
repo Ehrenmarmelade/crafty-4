@@ -40,7 +40,7 @@
     {% if data['permissions']['Files'] in data['user_permissions'] %}
     <li class="nav-item term-nav-item">
         <a class="nav-link {% if data['active_link'] == 'content' %}active{% end %}" href="/panel/server_detail?id={{ data['server_stats']['server_id']['server_id'] }}&subpage=content" role="tab" aria-selected="false">
-            <i class="ph-fill ph-package"></i>Content</a>
+            <i class="ph-fill ph-package"></i>{{ translate('serverDetails', 'content', data['lang']) }}</a>
     </li>
     {% end %}
     {% if data['permissions']['Config'] in data['user_permissions'] %}

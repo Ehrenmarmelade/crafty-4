@@ -556,6 +556,7 @@
     "serverDetails": {
         "backup": "Backup",
         "config": "Config",
+        "content": "Content",
         "files": "Files",
         "filter": "Filter Logs",
         "filterList": "Filtered Words",
