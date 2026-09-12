@@ -69,11 +69,13 @@ class ApiServersServerContentHandler(BaseApiHandler):
 
         server = self.controller.servers.get_server_data_by_id(server_id)
         if not server:
-            return self.finish_json(404, {"status": "error", "error": "SERVER_NOT_FOUND"})
+            return self.finish_json(
+                404, {"status": "error", "error": "SERVER_NOT_FOUND"}
+            )
 
         cm = ContentManager(
             server_path=server["path"],
-            mc=data.get("mc"),          # None -> autodetecta del servidor
+            mc=data.get("mc"),  # None -> autodetecta del servidor
             loader=data.get("loader"),  # None -> autodetecta del servidor
             cf_key=_get_cf_key(),
         )
@@ -88,22 +90,41 @@ class ApiServersServerContentHandler(BaseApiHandler):
 
         try:
             if action == "cached":
-                return self.finish_json(200, {"status": "ok", "data": await run(cm.load_cache)})
+                return self.finish_json(
+                    200, {"status": "ok", "data": await run(cm.load_cache)}
+                )
 
             if action == "context":
-                return self.finish_json(200, {"status": "ok",
-                    "data": {"mc": cm.mc, "loader": cm.loader}})
+                return self.finish_json(
+                    200, {"status": "ok", "data": {"mc": cm.mc, "loader": cm.loader}}
+                )
 
             if action == "save_cache":
-                return self.finish_json(200, {"status": "ok",
-                    "data": await run(cm.save_cache, data.get("inventory", []))})
+                return self.finish_json(
+                    200,
+                    {
+                        "status": "ok",
+                        "data": await run(cm.save_cache, data.get("inventory", [])),
+                    },
+                )
 
             if action == "scan_one":
-                return self.finish_json(200, {"status": "ok", "data": await run(
-                    cm.scan_one, data.get("filename", ""), data.get("content_type", "mod"))})
+                return self.finish_json(
+                    200,
+                    {
+                        "status": "ok",
+                        "data": await run(
+                            cm.scan_one,
+                            data.get("filename", ""),
+                            data.get("content_type", "mod"),
+                        ),
+                    },
+                )
 
             if action == "scan":
-                return self.finish_json(200, {"status": "ok", "data": await run(cm.scan)})
+                return self.finish_json(
+                    200, {"status": "ok", "data": await run(cm.scan)}
+                )
 
             if action == "plan":
                 inv = data.get("inventory") or await run(cm.scan)
@@ -118,51 +139,97 @@ class ApiServersServerContentHandler(BaseApiHandler):
                 inv = data.get("inventory") or await run(cm.scan)
                 plan = await run(cm.plan, inv, data.get("channel", "release"))
                 result = await run(cm.apply, plan)
-                logger.info("Content update applied on server %s: %s", server_id, result)
+                logger.info(
+                    "Content update applied on server %s: %s", server_id, result
+                )
                 return self.finish_json(200, {"status": "ok", "data": result})
 
             if action == "search":
-                hits = await run(cm.search, data.get("query", ""),
-                                 data.get("type", "mod"), int(data.get("limit", 10)))
+                hits = await run(
+                    cm.search,
+                    data.get("query", ""),
+                    data.get("type", "mod"),
+                    int(data.get("limit", 10)),
+                )
                 return self.finish_json(200, {"status": "ok", "data": hits})
 
             if action == "install":
-                res = await run(cm.install, data.get("id") or data.get("slug"),
-                                data.get("type", "mod"), data.get("channel", "release"))
+                res = await run(
+                    cm.install,
+                    data.get("id") or data.get("slug"),
+                    data.get("type", "mod"),
+                    data.get("channel", "release"),
+                )
                 logger.info("Content install on server %s: %s", server_id, res)
                 return self.finish_json(200, {"status": "ok", "data": res})
 
             if action == "detail":
-                return self.finish_json(200, {"status": "ok", "data": await run(
-                    cm.detail, data.get("source"), data.get("id") or data.get("slug"))})
+                return self.finish_json(
+                    200,
+                    {
+                        "status": "ok",
+                        "data": await run(
+                            cm.detail,
+                            data.get("source"),
+                            data.get("id") or data.get("slug"),
+                        ),
+                    },
+                )
 
             if action == "versions":
-                return self.finish_json(200, {"status": "ok", "data": await run(
-                    cm.versions, data.get("source"), data.get("id") or data.get("slug"),
-                    bool(data.get("all")), data.get("type", "mod"))})
+                return self.finish_json(
+                    200,
+                    {
+                        "status": "ok",
+                        "data": await run(
+                            cm.versions,
+                            data.get("source"),
+                            data.get("id") or data.get("slug"),
+                            bool(data.get("all")),
+                            data.get("type", "mod"),
+                        ),
+                    },
+                )
 
             if action == "install_version":
-                res = await run(cm.install_version, data.get("source"),
-                                data.get("id") or data.get("slug"), data.get("version_id"),
-                                data.get("current_filename"), data.get("type", "mod"))
+                res = await run(
+                    cm.install_version,
+                    data.get("source"),
+                    data.get("id") or data.get("slug"),
+                    data.get("version_id"),
+                    data.get("current_filename"),
+                    data.get("type", "mod"),
+                )
                 logger.info("Content install_version on server %s: %s", server_id, res)
                 return self.finish_json(200, {"status": "ok", "data": res})
 
             if action == "toggle":
-                return self.finish_json(200, {"status": "ok",
-                    "data": await run(cm.toggle, data.get("filename", ""),
-                                      data.get("content_type", "mod"))})
+                return self.finish_json(
+                    200,
+                    {
+                        "status": "ok",
+                        "data": await run(
+                            cm.toggle,
+                            data.get("filename", ""),
+                            data.get("content_type", "mod"),
+                        ),
+                    },
+                )
 
             if action == "remove":
-                res = await run(cm.remove, data.get("filename", ""),
-                                data.get("content_type", "mod"))
+                res = await run(
+                    cm.remove, data.get("filename", ""), data.get("content_type", "mod")
+                )
                 logger.info("Content remove on server %s: %s", server_id, res)
                 return self.finish_json(200, {"status": "ok", "data": res})
 
             if action == "update_one":
-                res = await run(cm.update_one, data.get("filename", ""),
-                                data.get("channel", "release"),
-                                data.get("content_type", "mod"))
+                res = await run(
+                    cm.update_one,
+                    data.get("filename", ""),
+                    data.get("channel", "release"),
+                    data.get("content_type", "mod"),
+                )
                 logger.info("Content update_one on server %s: %s", server_id, res)
                 return self.finish_json(200, {"status": "ok", "data": res})
 

@@ -6,6 +6,7 @@ register_server() de Crafty. Ejecutar con Crafty PARADO.
 
 Uso:  .venv\\Scripts\\python.exe register_existing.py "D:\\Minecraft" "Cobblemon Server"
 """
+
 import os
 import sys
 import uuid as uuidlib
@@ -25,8 +26,12 @@ SERVER_NAME = sys.argv[2] if len(sys.argv) > 2 else "Cobblemon Server"
 helper = Helpers()
 database = peewee.SqliteDatabase(
     helper.db_path,
-    pragmas={"journal_mode": "wal", "cache_size": -1024 * 10,
-             "busy_timeout": 5000, "synchronous": 1},
+    pragmas={
+        "journal_mode": "wal",
+        "cache_size": -1024 * 10,
+        "busy_timeout": 5000,
+        "synchronous": 1,
+    },
 )
 database_proxy.initialize(database)
 file_helper = FileHelpers(helper)
@@ -41,8 +46,10 @@ neo_base = os.path.join(SERVER_DIR, "libraries", "net", "neoforged", "neoforge")
 ver = sorted(os.listdir(neo_base))[-1]
 java = os.path.join(SERVER_DIR, "jre", "bin", "java.exe")
 java = java if os.path.exists(java) else "java"
-cmd = (f'"{java}" @user_jvm_args.txt '
-       f'@libraries/net/neoforged/neoforge/{ver}/win_args.txt nogui')
+cmd = (
+    f'"{java}" @user_jvm_args.txt '
+    f"@libraries/net/neoforged/neoforge/{ver}/win_args.txt nogui"
+)
 
 print(f"Servidor : {SERVER_DIR}")
 print(f"NeoForge : {ver}")
@@ -51,6 +58,7 @@ print(f"admin uid: {uid}")
 
 # --- ¿ya está registrado? (evita duplicados) ---
 from app.classes.models.servers import Servers
+
 existing = [s.server_name for s in Servers.select().where(Servers.path == SERVER_DIR)]
 if existing:
     print(f"YA registrado como: {existing}. No hago nada.")

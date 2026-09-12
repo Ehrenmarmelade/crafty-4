@@ -9,6 +9,7 @@ del servidor, y aplica actualizaciones con verificación de hash + backup.
 Fuente: Modrinth primero, CurseForge como fallback (su buscador de texto está
 capado para keys estándar, así que el descubrimiento va por Modrinth).
 """
+
 import os, json, time, hashlib
 import urllib.request, urllib.error, urllib.parse
 
@@ -162,38 +163,70 @@ class ContentManager:
                 fp = _cf_fingerprint(raw)
                 enabled = not low.endswith(".disabled")
                 display = name if enabled else name[:-9]
-                side = ("client-only" if ctype in ("resourcepack", "shader")
-                        else "server-only" if ctype == "datapack" else None)
-                inv[name] = {"filename": name, "display": display, "enabled": enabled,
-                             "content_type": ctype, "sha1": sha1, "murmur2": fp,
-                             "size": len(raw),
-                             "added": os.path.getmtime(os.path.join(folder, name)),
-                             "title": display, "icon": None,
-                             "author": None, "modrinth": None, "curseforge": None,
-                             "side": side, "latest": None, "update": False,
-                             "channel": None, "source": "unknown",
-                             "mr_date": None, "cf_date": None}
+                side = (
+                    "client-only"
+                    if ctype in ("resourcepack", "shader")
+                    else "server-only" if ctype == "datapack" else None
+                )
+                inv[name] = {
+                    "filename": name,
+                    "display": display,
+                    "enabled": enabled,
+                    "content_type": ctype,
+                    "sha1": sha1,
+                    "murmur2": fp,
+                    "size": len(raw),
+                    "added": os.path.getmtime(os.path.join(folder, name)),
+                    "title": display,
+                    "icon": None,
+                    "author": None,
+                    "modrinth": None,
+                    "curseforge": None,
+                    "side": side,
+                    "latest": None,
+                    "update": False,
+                    "channel": None,
+                    "source": "unknown",
+                    "mr_date": None,
+                    "cf_date": None,
+                }
                 sha_to[sha1] = name
                 fp_to[fp] = name
 
         sha1s = list(sha_to)
-        _, ident = _http_json(f"{MODRINTH}/version_files", "POST",
-                              body={"hashes": sha1s, "algorithm": "sha1"})
+        _, ident = _http_json(
+            f"{MODRINTH}/version_files",
+            "POST",
+            body={"hashes": sha1s, "algorithm": "sha1"},
+        )
         ident = ident if isinstance(ident, dict) else {}
         # updates: mods filtran por loader; packs/shaders/datapacks solo por versión MC
         mod_sha = [s for s in sha1s if inv[sha_to[s]]["content_type"] == "mod"]
         pack_sha = [s for s in sha1s if inv[sha_to[s]]["content_type"] != "mod"]
         upd = {}
         if mod_sha:
-            _, u = _http_json(f"{MODRINTH}/version_files/update", "POST",
-                              body={"hashes": mod_sha, "algorithm": "sha1",
-                                    "loaders": [self.loader], "game_versions": [self.mc]})
+            _, u = _http_json(
+                f"{MODRINTH}/version_files/update",
+                "POST",
+                body={
+                    "hashes": mod_sha,
+                    "algorithm": "sha1",
+                    "loaders": [self.loader],
+                    "game_versions": [self.mc],
+                },
+            )
             if isinstance(u, dict):
                 upd.update(u)
         if pack_sha:
-            _, u = _http_json(f"{MODRINTH}/version_files/update", "POST",
-                              body={"hashes": pack_sha, "algorithm": "sha1",
-                                    "game_versions": [self.mc]})
+            _, u = _http_json(
+                f"{MODRINTH}/version_files/update",
+                "POST",
+                body={
+                    "hashes": pack_sha,
+                    "algorithm": "sha1",
+                    "game_versions": [self.mc],
+                },
+            )
             if isinstance(u, dict):
                 upd.update(u)
 
@@ -201,39 +234,55 @@ class ContentManager:
         projects = self._mr_projects(pids)
         for sha1, ver in ident.items():
             rec = inv[sha_to[sha1]]
-            pid = ver.get("project_id"); proj = projects.get(pid, {})
-            rec["modrinth"] = {"projectId": pid, "versionId": ver.get("id"),
-                               "slug": proj.get("slug"), "title": proj.get("title")}
+            pid = ver.get("project_id")
+            proj = projects.get(pid, {})
+            rec["modrinth"] = {
+                "projectId": pid,
+                "versionId": ver.get("id"),
+                "slug": proj.get("slug"),
+                "title": proj.get("title"),
+            }
             rec["mr_date"] = ver.get("date_published")
             if proj.get("title"):
                 rec["title"] = proj["title"]
             rec["icon"] = proj.get("icon_url")
             ss, cs = proj.get("server_side"), proj.get("client_side")
             if ss and cs:
-                rec["side"] = ("client-only" if ss == "unsupported"
-                               else "server-only" if cs == "unsupported" else "both")
+                rec["side"] = (
+                    "client-only"
+                    if ss == "unsupported"
+                    else "server-only" if cs == "unsupported" else "both"
+                )
             rec["source"] = "modrinth"
         for sha1, ver in upd.items():
             rec = inv.get(sha_to.get(sha1))
             if not rec:
                 continue
             files = ver.get("files", [])
-            pf = next((f for f in files if f.get("primary")), files[0] if files else None)
+            pf = next(
+                (f for f in files if f.get("primary")), files[0] if files else None
+            )
             rec["channel"] = ver.get("version_type")
             if pf:
                 rec["latest"] = pf.get("filename")
                 rec["update"] = pf.get("hashes", {}).get("sha1") != sha1
 
         # CF fingerprint solo para MODS no identificados
-        unknown = [n for n, r in inv.items()
-                   if r["source"] == "unknown" and r["content_type"] == "mod"]
+        unknown = [
+            n
+            for n, r in inv.items()
+            if r["source"] == "unknown" and r["content_type"] == "mod"
+        ]
         if unknown and self.cf_key:
             matches = self._cf_fingerprints([inv[n]["murmur2"] for n in unknown])
             for fp, m in matches.items():
                 rec = inv[fp_to[fp]]
                 cur = m["file"]
-                rec["curseforge"] = {"modId": m["modId"], "fileId": cur.get("id"),
-                                     "fileName": cur.get("fileName")}
+                rec["curseforge"] = {
+                    "modId": m["modId"],
+                    "fileId": cur.get("id"),
+                    "fileName": cur.get("fileName"),
+                }
                 rec["cf_date"] = cur.get("fileDate")
                 rec["source"] = "curseforge"
                 info = self._cf_mod(m["modId"])
@@ -252,9 +301,16 @@ class ContentManager:
         try:
             os.makedirs(self.cache_dir, exist_ok=True)
             with open(self.cache_file, "w", encoding="utf-8") as f:
-                json.dump({"scanned_at": time.strftime("%Y-%m-%d %H:%M"),
-                           "mc": self.mc, "loader": self.loader,
-                           "inventory": result}, f, ensure_ascii=False)
+                json.dump(
+                    {
+                        "scanned_at": time.strftime("%Y-%m-%d %H:%M"),
+                        "mc": self.mc,
+                        "loader": self.loader,
+                        "inventory": result,
+                    },
+                    f,
+                    ensure_ascii=False,
+                )
         except OSError:
             pass
         return result
@@ -272,9 +328,16 @@ class ContentManager:
         try:
             os.makedirs(self.cache_dir, exist_ok=True)
             with open(self.cache_file, "w", encoding="utf-8") as f:
-                json.dump({"scanned_at": time.strftime("%Y-%m-%d %H:%M"),
-                           "mc": self.mc, "loader": self.loader,
-                           "inventory": inventory}, f, ensure_ascii=False)
+                json.dump(
+                    {
+                        "scanned_at": time.strftime("%Y-%m-%d %H:%M"),
+                        "mc": self.mc,
+                        "loader": self.loader,
+                        "inventory": inventory,
+                    },
+                    f,
+                    ensure_ascii=False,
+                )
             return {"ok": True}
         except OSError:
             return {"ok": False}
@@ -284,15 +347,33 @@ class ContentManager:
             raw = fh.read()
         enabled = not name.lower().endswith(".disabled")
         display = name if enabled else name[:-9]
-        side = ("client-only" if ctype in ("resourcepack", "shader")
-                else "server-only" if ctype == "datapack" else None)
-        return {"filename": name, "display": display, "enabled": enabled,
-                "content_type": ctype, "sha1": hashlib.sha1(raw).hexdigest(),
-                "murmur2": _cf_fingerprint(raw), "size": len(raw),
-                "added": os.path.getmtime(os.path.join(folder, name)),
-                "title": display, "icon": None, "author": None, "modrinth": None,
-                "curseforge": None, "side": side, "latest": None, "update": False,
-                "channel": None, "source": "unknown", "mr_date": None, "cf_date": None}
+        side = (
+            "client-only"
+            if ctype in ("resourcepack", "shader")
+            else "server-only" if ctype == "datapack" else None
+        )
+        return {
+            "filename": name,
+            "display": display,
+            "enabled": enabled,
+            "content_type": ctype,
+            "sha1": hashlib.sha1(raw).hexdigest(),
+            "murmur2": _cf_fingerprint(raw),
+            "size": len(raw),
+            "added": os.path.getmtime(os.path.join(folder, name)),
+            "title": display,
+            "icon": None,
+            "author": None,
+            "modrinth": None,
+            "curseforge": None,
+            "side": side,
+            "latest": None,
+            "update": False,
+            "channel": None,
+            "source": "unknown",
+            "mr_date": None,
+            "cf_date": None,
+        }
 
     def scan_one(self, filename, content_type="mod"):
         """Escanea un único archivo (rápido) y devuelve su registro — para
@@ -301,38 +382,55 @@ class ContentManager:
         if not filename or not os.path.exists(os.path.join(folder, filename)):
             return None
         rec = self._record_for(folder, filename, content_type)
-        _, ident = _http_json(f"{MODRINTH}/version_files", "POST",
-                              body={"hashes": [rec["sha1"]], "algorithm": "sha1"})
+        _, ident = _http_json(
+            f"{MODRINTH}/version_files",
+            "POST",
+            body={"hashes": [rec["sha1"]], "algorithm": "sha1"},
+        )
         ver = (ident or {}).get(rec["sha1"]) if isinstance(ident, dict) else None
         if ver and ver.get("project_id"):
             pid = ver["project_id"]
             proj = self._mr_projects([pid]).get(pid, {})
-            rec["modrinth"] = {"projectId": pid, "versionId": ver.get("id"),
-                               "slug": proj.get("slug"), "title": proj.get("title")}
+            rec["modrinth"] = {
+                "projectId": pid,
+                "versionId": ver.get("id"),
+                "slug": proj.get("slug"),
+                "title": proj.get("title"),
+            }
             rec["mr_date"] = ver.get("date_published")
             if proj.get("title"):
                 rec["title"] = proj["title"]
             rec["icon"] = proj.get("icon_url")
             ss, cs = proj.get("server_side"), proj.get("client_side")
             if ss and cs:
-                rec["side"] = ("client-only" if ss == "unsupported"
-                               else "server-only" if cs == "unsupported" else "both")
+                rec["side"] = (
+                    "client-only"
+                    if ss == "unsupported"
+                    else "server-only" if cs == "unsupported" else "both"
+                )
             rec["source"] = "modrinth"
             best = self._mr_best_generic(pid, content_type, channels_allowed("alpha"))
             if best:
                 files = best.get("files", [])
-                pf = next((f for f in files if f.get("primary")), files[0] if files else None)
+                pf = next(
+                    (f for f in files if f.get("primary")), files[0] if files else None
+                )
                 rec["channel"] = best.get("version_type")
                 if pf:
                     rec["latest"] = pf.get("filename")
-                    rec["update"] = (best.get("date_published", "") > (rec["mr_date"] or "")
-                                     and pf.get("hashes", {}).get("sha1") != rec["sha1"])
+                    rec["update"] = (
+                        best.get("date_published", "") > (rec["mr_date"] or "")
+                        and pf.get("hashes", {}).get("sha1") != rec["sha1"]
+                    )
         elif content_type == "mod" and self.cf_key:
             m = self._cf_fingerprints([rec["murmur2"]]).get(rec["murmur2"])
             if m:
                 cur = m["file"]
-                rec["curseforge"] = {"modId": m["modId"], "fileId": cur.get("id"),
-                                     "fileName": cur.get("fileName")}
+                rec["curseforge"] = {
+                    "modId": m["modId"],
+                    "fileId": cur.get("id"),
+                    "fileName": cur.get("fileName"),
+                }
                 rec["cf_date"] = cur.get("fileDate")
                 rec["source"] = "curseforge"
                 info = self._cf_mod(m["modId"])
@@ -351,8 +449,11 @@ class ContentManager:
     # ---------- plan / apply ----------
     def plan(self, inventory, channel="release"):
         allowed = channels_allowed(channel)
-        installed = {r["modrinth"]["projectId"] for r in inventory
-                     if r.get("modrinth") and r["modrinth"].get("projectId")}
+        installed = {
+            r["modrinth"]["projectId"]
+            for r in inventory
+            if r.get("modrinth") and r["modrinth"].get("projectId")
+        }
         out = []
         for r in inventory:
             if r["source"] == "modrinth" and r.get("modrinth"):
@@ -360,33 +461,59 @@ class ContentManager:
                 if not best:
                     continue
                 files = best.get("files", [])
-                pf = next((f for f in files if f.get("primary")), files[0] if files else None)
+                pf = next(
+                    (f for f in files if f.get("primary")), files[0] if files else None
+                )
                 if not pf:
                     continue
                 new_sha1 = pf.get("hashes", {}).get("sha1")
                 cand_date = best.get("date_published")
-                newer = (not r.get("mr_date")) or (cand_date and cand_date > r["mr_date"])
+                newer = (not r.get("mr_date")) or (
+                    cand_date and cand_date > r["mr_date"]
+                )
                 if new_sha1 and new_sha1 != r["sha1"] and newer:
-                    deps = [d["project_id"] for d in best.get("dependencies", [])
-                            if d.get("dependency_type") == "required" and d.get("project_id")
-                            and d["project_id"] not in installed]
-                    out.append({"name": r["filename"], "source": "modrinth",
-                                "url": pf.get("url"), "sha1": new_sha1,
-                                "newname": pf.get("filename"),
-                                "channel": best.get("version_type"),
-                                "deps": deps, "blocked": False})
+                    deps = [
+                        d["project_id"]
+                        for d in best.get("dependencies", [])
+                        if d.get("dependency_type") == "required"
+                        and d.get("project_id")
+                        and d["project_id"] not in installed
+                    ]
+                    out.append(
+                        {
+                            "name": r["filename"],
+                            "source": "modrinth",
+                            "url": pf.get("url"),
+                            "sha1": new_sha1,
+                            "newname": pf.get("filename"),
+                            "channel": best.get("version_type"),
+                            "deps": deps,
+                            "blocked": False,
+                        }
+                    )
             elif r["source"] == "curseforge" and r.get("curseforge"):
                 mod_id = r["curseforge"]["modId"]
                 best = self._cf_best(mod_id, allowed)
                 cand_date = best.get("fileDate") if best else None
-                newer = (not r.get("cf_date")) or (cand_date and cand_date > r["cf_date"])
+                newer = (not r.get("cf_date")) or (
+                    cand_date and cand_date > r["cf_date"]
+                )
                 if best and best.get("id") != r["curseforge"]["fileId"] and newer:
-                    url = best.get("downloadUrl") or self._cf_download_url(mod_id, best["id"])
-                    out.append({"name": r["filename"], "source": "curseforge",
-                                "url": url, "sha1": self._cf_sha1(best),
-                                "newname": best.get("fileName"),
-                                "channel": CF_RELEASETYPE.get(best.get("releaseType")),
-                                "deps": [], "blocked": url is None})
+                    url = best.get("downloadUrl") or self._cf_download_url(
+                        mod_id, best["id"]
+                    )
+                    out.append(
+                        {
+                            "name": r["filename"],
+                            "source": "curseforge",
+                            "url": url,
+                            "sha1": self._cf_sha1(best),
+                            "newname": best.get("fileName"),
+                            "channel": CF_RELEASETYPE.get(best.get("releaseType")),
+                            "deps": [],
+                            "blocked": url is None,
+                        }
+                    )
         return out
 
     def apply(self, plan):
@@ -396,12 +523,16 @@ class ContentManager:
         results = []
         for p in plan:
             if p.get("blocked") or not p.get("url"):
-                results.append({"name": p["name"], "ok": False, "reason": "no_download_url"})
+                results.append(
+                    {"name": p["name"], "ok": False, "reason": "no_download_url"}
+                )
                 continue
             dest = os.path.join(dl, p["newname"])
             good, got = _download(p["url"], dest, p.get("sha1"))
             if not good:
-                results.append({"name": p["name"], "ok": False, "reason": "hash_mismatch"})
+                results.append(
+                    {"name": p["name"], "ok": False, "reason": "hash_mismatch"}
+                )
                 continue
             os.makedirs(backup, exist_ok=True)
             old = os.path.join(self.mods_dir, p["name"])
@@ -446,32 +577,48 @@ class ContentManager:
         sha1 = hashlib.sha1(raw).hexdigest()
         fp = _cf_fingerprint(raw)
         allowed = channels_allowed(channel)
-        _, ident = _http_json(f"{MODRINTH}/version_files", "POST",
-                              body={"hashes": [sha1], "algorithm": "sha1"})
+        _, ident = _http_json(
+            f"{MODRINTH}/version_files",
+            "POST",
+            body={"hashes": [sha1], "algorithm": "sha1"},
+        )
         ver = (ident or {}).get(sha1)
         if ver and ver.get("project_id"):
             best = self._mr_best_generic(ver["project_id"], content_type, allowed)
             if not best:
                 return {"ok": False, "reason": "no_version"}
             files = best.get("files", [])
-            pf = next((f for f in files if f.get("primary")), files[0] if files else None)
+            pf = next(
+                (f for f in files if f.get("primary")), files[0] if files else None
+            )
             new_sha1 = (pf or {}).get("hashes", {}).get("sha1")
             older = best.get("date_published", "") <= (ver.get("date_published") or "")
             if not new_sha1 or new_sha1 == sha1 or older:
                 return {"ok": False, "reason": "already_latest"}
-            return self._swap(filename, pf["url"], new_sha1, pf["filename"], content_type)
+            return self._swap(
+                filename, pf["url"], new_sha1, pf["filename"], content_type
+            )
         if content_type == "mod":
             m = self._cf_fingerprints([fp]).get(fp)
             if m:
                 best = self._cf_best(m["modId"], allowed)
-                older = best and best.get("fileDate", "") <= (m["file"].get("fileDate") or "")
+                older = best and best.get("fileDate", "") <= (
+                    m["file"].get("fileDate") or ""
+                )
                 if not best or best.get("id") == m["file"].get("id") or older:
                     return {"ok": False, "reason": "already_latest"}
-                url = best.get("downloadUrl") or self._cf_download_url(m["modId"], best["id"])
+                url = best.get("downloadUrl") or self._cf_download_url(
+                    m["modId"], best["id"]
+                )
                 if not url:
                     return {"ok": False, "reason": "download_blocked"}
-                return self._swap(filename, url, self._cf_sha1(best),
-                                  best.get("fileName"), content_type)
+                return self._swap(
+                    filename,
+                    url,
+                    self._cf_sha1(best),
+                    best.get("fileName"),
+                    content_type,
+                )
         return {"ok": False, "reason": "not_identified"}
 
     def _swap(self, old_name, url, sha1, new_name, content_type="mod"):
@@ -494,8 +641,12 @@ class ContentManager:
         facets = [[f"project_type:{project_type}"], [f"versions:{self.mc}"]]
         if project_type == "mod":
             facets.append([f"categories:{self.loader}"])
-        params = {"query": query or "", "limit": str(limit),
-                  "index": "relevance", "facets": json.dumps(facets)}
+        params = {
+            "query": query or "",
+            "limit": str(limit),
+            "index": "relevance",
+            "facets": json.dumps(facets),
+        }
         _, r = _http_json(f"{MODRINTH}/search?" + urllib.parse.urlencode(params))
         return r.get("hits", []) if isinstance(r, dict) else []
 
@@ -511,9 +662,14 @@ class ContentManager:
         pf = next((f for f in files if f.get("primary")), files[0] if files else None)
         if not pf:
             return {"ok": False, "reason": "no_file"}
-        folder = os.path.join(self.server_path, FOLDER_BY_TYPE.get(project_type, "mods"))
-        good, _ = _download(pf["url"], os.path.join(folder, pf["filename"]),
-                            pf.get("hashes", {}).get("sha1"))
+        folder = os.path.join(
+            self.server_path, FOLDER_BY_TYPE.get(project_type, "mods")
+        )
+        good, _ = _download(
+            pf["url"],
+            os.path.join(folder, pf["filename"]),
+            pf.get("hashes", {}).get("sha1"),
+        )
         if not good:
             return {"ok": False, "reason": "hash_mismatch"}
         installed = [pf["filename"]]
@@ -524,10 +680,18 @@ class ContentManager:
                 if not db:
                     continue
                 dfiles = db.get("files", [])
-                dpf = next((f for f in dfiles if f.get("primary")), dfiles[0] if dfiles else None)
-                if dpf and not os.path.exists(os.path.join(self.mods_dir, dpf["filename"])):
-                    ok, _ = _download(dpf["url"], os.path.join(self.mods_dir, dpf["filename"]),
-                                      dpf.get("hashes", {}).get("sha1"))
+                dpf = next(
+                    (f for f in dfiles if f.get("primary")),
+                    dfiles[0] if dfiles else None,
+                )
+                if dpf and not os.path.exists(
+                    os.path.join(self.mods_dir, dpf["filename"])
+                ):
+                    ok, _ = _download(
+                        dpf["url"],
+                        os.path.join(self.mods_dir, dpf["filename"]),
+                        dpf.get("hashes", {}).get("sha1"),
+                    )
                     if ok:
                         installed.append(dpf["filename"])
         return {"ok": True, "installed": installed}
@@ -550,24 +714,41 @@ class ContentManager:
             _, p = _http_json(f"{MODRINTH}/project/{ident}")
             if not p:
                 return None
-            return {"source": "modrinth", "title": p.get("title"),
-                    "summary": p.get("description"), "icon": p.get("icon_url"),
-                    "downloads": p.get("downloads"), "updated": p.get("updated"),
-                    "categories": p.get("categories", []), "author": None,
-                    "url": f"https://modrinth.com/mod/{p.get('slug')}",
-                    "links": {"source": p.get("source_url"),
-                              "issues": p.get("issues_url"), "wiki": p.get("wiki_url")}}
-        _, r = _http_json(f"{CURSEFORGE}/mods/{ident}", headers={"x-api-key": self.cf_key})
+            return {
+                "source": "modrinth",
+                "title": p.get("title"),
+                "summary": p.get("description"),
+                "icon": p.get("icon_url"),
+                "downloads": p.get("downloads"),
+                "updated": p.get("updated"),
+                "categories": p.get("categories", []),
+                "author": None,
+                "url": f"https://modrinth.com/mod/{p.get('slug')}",
+                "links": {
+                    "source": p.get("source_url"),
+                    "issues": p.get("issues_url"),
+                    "wiki": p.get("wiki_url"),
+                },
+            }
+        _, r = _http_json(
+            f"{CURSEFORGE}/mods/{ident}", headers={"x-api-key": self.cf_key}
+        )
         d = (r or {}).get("data")
         if not d:
             return None
         authors = d.get("authors") or []
-        return {"source": "curseforge", "title": d.get("name"),
-                "summary": d.get("summary"), "icon": (d.get("logo") or {}).get("url"),
-                "downloads": d.get("downloadCount"), "updated": d.get("dateModified"),
-                "categories": [c.get("name") for c in d.get("categories", [])],
-                "author": authors[0]["name"] if authors else None,
-                "url": (d.get("links") or {}).get("websiteUrl"), "links": {}}
+        return {
+            "source": "curseforge",
+            "title": d.get("name"),
+            "summary": d.get("summary"),
+            "icon": (d.get("logo") or {}).get("url"),
+            "downloads": d.get("downloadCount"),
+            "updated": d.get("dateModified"),
+            "categories": [c.get("name") for c in d.get("categories", [])],
+            "author": authors[0]["name"] if authors else None,
+            "url": (d.get("links") or {}).get("websiteUrl"),
+            "links": {},
+        }
 
     def versions(self, source, ident, all_versions=False, project_type="mod"):
         out = []
@@ -581,45 +762,72 @@ class ContentManager:
             else:  # resourcepack/shader/datapack: NO se filtra por loader de mods
                 url = f"{MODRINTH}/project/{ident}/version?game_versions={gv}"
             _, vs = _http_json(url)
-            for v in (vs or []):
+            for v in vs or []:
                 files = v.get("files", [])
-                pf = next((f for f in files if f.get("primary")), files[0] if files else None)
-                out.append({"id": v.get("id"), "name": v.get("version_number"),
-                            "type": v.get("version_type"), "date": v.get("date_published"),
-                            "game_versions": v.get("game_versions", []),
-                            "loaders": v.get("loaders", []),
-                            "filename": pf.get("filename") if pf else None})
+                pf = next(
+                    (f for f in files if f.get("primary")), files[0] if files else None
+                )
+                out.append(
+                    {
+                        "id": v.get("id"),
+                        "name": v.get("version_number"),
+                        "type": v.get("version_type"),
+                        "date": v.get("date_published"),
+                        "game_versions": v.get("game_versions", []),
+                        "loaders": v.get("loaders", []),
+                        "filename": pf.get("filename") if pf else None,
+                    }
+                )
         else:
             if all_versions:
                 url = f"{CURSEFORGE}/mods/{ident}/files?pageSize=50"
             elif project_type == "mod":
-                url = (f"{CURSEFORGE}/mods/{ident}/files"
-                       f"?gameVersion={self.mc}&modLoaderType={self.lt}&pageSize=50")
+                url = (
+                    f"{CURSEFORGE}/mods/{ident}/files"
+                    f"?gameVersion={self.mc}&modLoaderType={self.lt}&pageSize=50"
+                )
             else:
-                url = f"{CURSEFORGE}/mods/{ident}/files?gameVersion={self.mc}&pageSize=50"
+                url = (
+                    f"{CURSEFORGE}/mods/{ident}/files?gameVersion={self.mc}&pageSize=50"
+                )
             _, r = _http_json(url, headers={"x-api-key": self.cf_key})
             for f in (r or {}).get("data", []):
-                out.append({"id": f.get("id"), "name": f.get("fileName"),
-                            "type": CF_RELEASETYPE.get(f.get("releaseType")),
-                            "date": f.get("fileDate"),
-                            "game_versions": f.get("gameVersions", []),
-                            "loaders": [], "filename": f.get("fileName")})
+                out.append(
+                    {
+                        "id": f.get("id"),
+                        "name": f.get("fileName"),
+                        "type": CF_RELEASETYPE.get(f.get("releaseType")),
+                        "date": f.get("fileDate"),
+                        "game_versions": f.get("gameVersions", []),
+                        "loaders": [],
+                        "filename": f.get("fileName"),
+                    }
+                )
         return out
 
-    def install_version(self, source, ident, version_id, current_filename=None,
-                        project_type="mod"):
+    def install_version(
+        self, source, ident, version_id, current_filename=None, project_type="mod"
+    ):
         if source == "modrinth":
             _, v = _http_json(f"{MODRINTH}/version/{version_id}")
             if not v:
                 return {"ok": False, "reason": "version_not_found"}
             files = v.get("files", [])
-            pf = next((f for f in files if f.get("primary")), files[0] if files else None)
+            pf = next(
+                (f for f in files if f.get("primary")), files[0] if files else None
+            )
             if not pf:
                 return {"ok": False, "reason": "no_file"}
-            url, sha1, fname = pf.get("url"), pf.get("hashes", {}).get("sha1"), pf.get("filename")
+            url, sha1, fname = (
+                pf.get("url"),
+                pf.get("hashes", {}).get("sha1"),
+                pf.get("filename"),
+            )
         else:
-            _, r = _http_json(f"{CURSEFORGE}/mods/{ident}/files/{version_id}",
-                              headers={"x-api-key": self.cf_key})
+            _, r = _http_json(
+                f"{CURSEFORGE}/mods/{ident}/files/{version_id}",
+                headers={"x-api-key": self.cf_key},
+            )
             fobj = (r or {}).get("data")
             if not fobj:
                 return {"ok": False, "reason": "file_not_found"}
@@ -629,16 +837,22 @@ class ContentManager:
                 return {"ok": False, "reason": "download_blocked"}
         if current_filename:
             return self._swap(current_filename, url, sha1, fname, project_type)
-        folder = os.path.join(self.server_path, FOLDER_BY_TYPE.get(project_type, "mods"))
+        folder = os.path.join(
+            self.server_path, FOLDER_BY_TYPE.get(project_type, "mods")
+        )
         good, _ = _download(url, os.path.join(folder, fname), sha1)
-        return {"ok": True, "new": fname} if good else {"ok": False, "reason": "hash_mismatch"}
+        return (
+            {"ok": True, "new": fname}
+            if good
+            else {"ok": False, "reason": "hash_mismatch"}
+        )
 
     # ---------- helpers ----------
     def _mr_projects(self, ids):
         out = {}
         ids = list(ids)
         for i in range(0, len(ids), 100):
-            q = urllib.parse.quote(json.dumps(ids[i:i + 100]))
+            q = urllib.parse.quote(json.dumps(ids[i : i + 100]))
             _, r = _http_json(f"{MODRINTH}/projects?ids={q}")
             if isinstance(r, list):
                 for p in r:
@@ -648,14 +862,20 @@ class ContentManager:
     def _mr_best(self, pid, allowed):
         lo = urllib.parse.quote(json.dumps([self.loader]))
         gv = urllib.parse.quote(json.dumps([self.mc]))
-        _, r = _http_json(f"{MODRINTH}/project/{pid}/version?loaders={lo}&game_versions={gv}")
+        _, r = _http_json(
+            f"{MODRINTH}/project/{pid}/version?loaders={lo}&game_versions={gv}"
+        )
         vs = [v for v in (r or []) if v.get("version_type") in allowed]
         vs.sort(key=lambda v: v.get("date_published", ""), reverse=True)
         return vs[0] if vs else None
 
     def _cf_fingerprints(self, fps):
-        _, r = _http_json(f"{CURSEFORGE}/fingerprints", "POST",
-                          headers={"x-api-key": self.cf_key}, body={"fingerprints": fps})
+        _, r = _http_json(
+            f"{CURSEFORGE}/fingerprints",
+            "POST",
+            headers={"x-api-key": self.cf_key},
+            body={"fingerprints": fps},
+        )
         matches = {}
         if r:
             for m in r.get("data", {}).get("exactMatches", []):
@@ -664,22 +884,30 @@ class ContentManager:
         return matches
 
     def _cf_best(self, mod_id, allowed):
-        url = (f"{CURSEFORGE}/mods/{mod_id}/files"
-               f"?gameVersion={self.mc}&modLoaderType={self.lt}&pageSize=30")
+        url = (
+            f"{CURSEFORGE}/mods/{mod_id}/files"
+            f"?gameVersion={self.mc}&modLoaderType={self.lt}&pageSize=30"
+        )
         _, r = _http_json(url, headers={"x-api-key": self.cf_key})
-        files = [f for f in (r.get("data", []) if r else [])
-                 if CF_RELEASETYPE.get(f.get("releaseType"), "release") in allowed]
+        files = [
+            f
+            for f in (r.get("data", []) if r else [])
+            if CF_RELEASETYPE.get(f.get("releaseType"), "release") in allowed
+        ]
         files.sort(key=lambda f: f.get("fileDate", ""), reverse=True)
         return files[0] if files else None
 
     def _cf_download_url(self, mod_id, file_id):
-        _, r = _http_json(f"{CURSEFORGE}/mods/{mod_id}/files/{file_id}/download-url",
-                          headers={"x-api-key": self.cf_key})
+        _, r = _http_json(
+            f"{CURSEFORGE}/mods/{mod_id}/files/{file_id}/download-url",
+            headers={"x-api-key": self.cf_key},
+        )
         return r.get("data") if r else None
 
     def _cf_mod(self, mod_id):
-        _, r = _http_json(f"{CURSEFORGE}/mods/{mod_id}",
-                          headers={"x-api-key": self.cf_key})
+        _, r = _http_json(
+            f"{CURSEFORGE}/mods/{mod_id}", headers={"x-api-key": self.cf_key}
+        )
         return r.get("data") if r else None
 
     @staticmethod

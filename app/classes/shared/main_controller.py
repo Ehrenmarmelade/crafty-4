@@ -1221,9 +1221,7 @@ class Controller:
         if match:
             return {"loader": match.group(1), "version": match.group(2)}
         # Installer form (pre-install / older): <loader>-installer-<ver>.jar
-        match = re.search(
-            r"(forge|neoforge)-installer-([0-9]+(?:\.[0-9]+)*)", cmd
-        )
+        match = re.search(r"(forge|neoforge)-installer-([0-9]+(?:\.[0-9]+)*)", cmd)
         if match:
             return {"loader": match.group(1), "version": match.group(2)}
         low = cmd.lower()
@@ -1301,8 +1299,12 @@ class Controller:
                         "neoforged" if old["loader"] == "neoforge" else "minecraftforge"
                     )
                     old_lib = os.path.join(
-                        server_path, "libraries", "net", vendor,
-                        old["loader"], old["version"],
+                        server_path,
+                        "libraries",
+                        "net",
+                        vendor,
+                        old["loader"],
+                        old["version"],
                     )
                     if os.path.isdir(old_lib):
                         FileHelpers.del_dirs(old_lib)
@@ -1407,7 +1409,7 @@ class Controller:
         matching = [v for v in versions if v.startswith(prefix)]
 
         def sort_key(v):
-            tail = v[len(prefix):].split("-")[0]
+            tail = v[len(prefix) :].split("-")[0]
             return int(tail) if tail.isdigit() else 0
 
         matching.sort(key=sort_key, reverse=True)
@@ -1415,9 +1417,7 @@ class Controller:
 
     @staticmethod
     def _fetch_fabric_builds():
-        resp = requests.get(
-            "https://meta.fabricmc.net/v2/versions/loader", timeout=8
-        )
+        resp = requests.get("https://meta.fabricmc.net/v2/versions/loader", timeout=8)
         return [
             {"build": e["version"], "stable": bool(e.get("stable"))}
             for e in resp.json()
