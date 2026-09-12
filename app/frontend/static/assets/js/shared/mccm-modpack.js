@@ -131,13 +131,14 @@ window.MccmModpack = (function () {
         renderSummary(body, hit, v, r.data);
     }
     function summaryTable(s) {
-        return `<table class="table table-sm mb-2"><tbody>
-            <tr><th style="width:40%">${t('pack')}</th><td>${esc(s.name)} <span class="text-muted">${esc(s.version)}</span></td></tr>
-            <tr><th>${t('mcCol')}</th><td>${esc(s.mc)}</td></tr>
-            <tr><th>${t('loaderCol')}</th><td>${esc(s.loader)}${s.loader_build ? ' <span class="text-muted">' + esc(s.loader_build) + '</span>' : ''}</td></tr>
-            <tr><th>${t('files')}</th><td>${s.file_count} <span class="text-muted">${fmtBytes(s.total_bytes)}</span>` +
-            `${(s.skipped || []).length ? ` · <span class="text-muted">${t('skipped', { n: s.skipped.length })}</span>` : ''}</td></tr>
-        </tbody></table>` + blockedList(s.blocked);
+        const row = (label, value) => `<tr><td class="text-muted" style="width:40%;white-space:nowrap">${label}</td><td>${value}</td></tr>`;
+        return `<table class="table table-sm mb-2"><tbody>` +
+            row(t('pack'), `${esc(s.name)} <span class="text-muted">${esc(s.version)}</span>`) +
+            row(t('mcCol'), esc(s.mc)) +
+            row(t('loaderCol'), esc(s.loader) + (s.loader_build ? ' <span class="text-muted">' + esc(s.loader_build) + '</span>' : '')) +
+            row(t('files'), `${s.file_count} <span class="text-muted">${fmtBytes(s.total_bytes)}</span>` +
+                ((s.skipped || []).length ? ` · <span class="text-muted">${t('skipped', { n: s.skipped.length })}</span>` : '')) +
+            `</tbody></table>` + blockedList(s.blocked);
     }
     function blockedList(blocked) {
         if (!blocked || !blocked.length) return '';
