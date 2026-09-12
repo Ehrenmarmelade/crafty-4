@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import logging
 import threading
@@ -127,9 +128,11 @@ class ApiServersServerContentHandler(BaseApiHandler):
             hint = self.controller.detect_server_loader(server_id) or {}
         except Exception:  # pylint: disable=broad-except
             hint = {}
-        hint_ver = str(hint.get("version") or "")
+        # version is the MC version for installer-form commands, but the
+        # loader build for library-form ones (forge: "1.20.1-47.3.0").
+        hint_ver = str(hint.get("version") or "").split("-", maxsplit=1)[0]
         cm.apply_hints(
-            mc=hint_ver if hint_ver.startswith("1.") else None,
+            mc=hint_ver if re.match(r"^1\.\d+(\.\d+)?$", hint_ver) else None,
             loader=hint.get("loader"),
         )
 
