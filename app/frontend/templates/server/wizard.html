@@ -269,10 +269,10 @@
           <h4><i class="ph-fill ph-package"></i>&nbsp;{{ translate('serverWizard', 'modpackTitle', data['lang']) }}
             <small class="text-none"> - {{ translate('serverWizard', 'modpackSubtitle', data['lang']) }}</small></h4>
           <p class="text-muted" style="font-size:.85rem;">{{ translate('serverWizard', 'modpackHint', data['lang']) }}</p>
-          <ul class="nav nav-tabs mb-3" id="mp-src-tabs" role="tablist">
-            <li class="nav-item"><a class="nav-link active" href="#mp-pane-search" data-mp-pane="mp-pane-search"><i class="ph ph-magnifying-glass"></i> {{ translate('serverWizard', 'modpackSearchTab', data['lang']) }}</a></li>
-            <li class="nav-item"><a class="nav-link" href="#mp-pane-url" data-mp-pane="mp-pane-url"><i class="ph ph-link"></i> {{ translate('serverWizard', 'modpackUrlTab', data['lang']) }}</a></li>
-            <li class="nav-item"><a class="nav-link" href="#mp-pane-upload" data-mp-pane="mp-pane-upload"><i class="ph ph-upload-simple"></i> {{ translate('serverWizard', 'modpackUploadTab', data['lang']) }}</a></li>
+          <ul class="nav nav-pills tab-simple-styled mb-3" id="mp-src-tabs" role="tablist">
+            <li class="nav-item term-nav-item"><a class="nav-link active" href="#mp-pane-search" data-mp-pane="mp-pane-search"><i class="ph ph-magnifying-glass"></i> {{ translate('serverWizard', 'modpackSearchTab', data['lang']) }}</a></li>
+            <li class="nav-item term-nav-item"><a class="nav-link" href="#mp-pane-url" data-mp-pane="mp-pane-url"><i class="ph ph-link"></i> {{ translate('serverWizard', 'modpackUrlTab', data['lang']) }}</a></li>
+            <li class="nav-item term-nav-item"><a class="nav-link" href="#mp-pane-upload" data-mp-pane="mp-pane-upload"><i class="ph ph-upload-simple"></i> {{ translate('serverWizard', 'modpackUploadTab', data['lang']) }}</a></li>
           </ul>
           <div id="mccm-status" class="text-muted small mb-2"></div>
           <div id="mp-pane-search" class="mp-pane">

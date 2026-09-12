@@ -166,7 +166,7 @@ window.MccmModpack = (function () {
                 <button id="mccm-mp-go" class="btn btn-primary"><i class="ph ph-download-simple"></i> ${t('installIntoServer')}</button>`;
         }
         body.innerHTML =
-            `<h4 style="margin:0 0 .5rem">${esc(hit.title)} <small class="text-muted">${esc(v.name)}</small></h4>` +
+            `<h4 style="margin:0 0 .5rem">${esc(s.name || hit.title)} <small class="text-muted">${esc(v.name)}</small></h4>` +
             summaryTable(s) + warn + action;
         document.getElementById('mccm-mp-go').onclick = async function () {
             this.disabled = true;
