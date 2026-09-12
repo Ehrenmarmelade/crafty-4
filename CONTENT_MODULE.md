@@ -1,77 +1,116 @@
-# Módulo "Content" — gestor de mods/packs (fork)
+# "Content" module — mods, packs and modpacks (fork feature)
 
-Añade a Crafty la gestión de contenido del servidor: identifica los mods por
-hash en **Modrinth** (sha1) y **CurseForge** (murmur2 fingerprint), detecta
-actualizaciones para la versión de MC + loader, y las aplica con verificación de
-hash + backup. Fuente: **Modrinth primero, CurseForge como fallback**
-(su buscador de texto `/v1/mods/search` está capado para keys estándar).
+Adds in-panel content management to Crafty: identify installed mods by hash on
+**Modrinth** (sha1) and **CurseForge** (murmur2 fingerprint), find and apply
+updates for the server's MC version + loader, search and install new mods /
+resource packs / shaders / datapacks, and — since the modpack browser —
+**install whole modpacks** into an existing server or **create a new server
+from a modpack**. Source order: Modrinth first, CurseForge as fallback (its
+text search is restricted for standard API keys).
 
-## Qué se ha añadido
+## Files
 
-| Archivo | Rol |
+| File | Role |
 |---|---|
-| `app/classes/minecraft/content_manager.py` | Motor (solo stdlib): `scan / plan / apply / search` |
-| `app/classes/web/routes/api/servers/server/content.py` | Handler Tornado `ApiServersServerContentHandler` |
-| `app/classes/web/routes/api/api_handlers.py` | Import + ruta `…/content/?` registrados |
-| `app/config/content.json.example` | Plantilla para la CurseForge API key |
+| `app/classes/minecraft/content_manager.py` | Engine (stdlib only): `scan / plan / apply / search / install / versions / modpack_search / cf_slug_to_id`, MC + loader autodetect |
+| `app/classes/minecraft/modpack_installer.py` | `ModpackInstaller`: parse `.mrpack` / CurseForge `manifest.json` zips (`resolve*`) and install them (`install`) |
+| `app/classes/web/routes/api/servers/server/content.py` | `POST /api/v2/servers/<id>/content` — per-server actions (needs the server **Files** permission) |
+| `app/classes/web/routes/api/crafty/modpack.py` | `POST /api/v2/crafty/modpack` — modpack browsing for the creation wizard (needs **Server Creation**) |
+| `app/classes/shared/main_controller.py` | `create_type=modpack` server creation (`_prepare_modpack_create`, `_t_create_modpack_server`) + loader build installers |
+| `app/frontend/templates/panel/server_content.html` | "Content" tab: *Installed* pane + *Add content* pane |
+| `app/frontend/templates/server/wizard.html` | "Create from a modpack" card |
+| `app/frontend/static/assets/js/shared/mccm-common.js`, `mccm-modpack.js`, `css/mccm.css` | shared UI code |
+| `app/config/content.json.example` | template for the CurseForge API key |
 
-## Configurar la CurseForge API key
+## CurseForge API key
 
-Variable de entorno (tiene prioridad):
-```
-set CURSEFORGE_API_KEY=tu_key   REM Windows
-```
-o `cp app/config/content.json.example app/config/content.json` y rellénala.
-Solo hace falta para los mods exclusivos de CurseForge; Modrinth no necesita key.
+Only needed for CurseForge-exclusive content and CurseForge modpacks. Modrinth
+works without a key.
 
-## Endpoint
-
-`POST /api/v2/servers/<server_id>/content` (requiere permiso **FILES** del servidor)
-
-| body `action` | efecto |
-|---|---|
-| `scan` | inventario unificado por mod (source, side, update, channel…) |
-| `plan` + `channel` (`release`/`beta`/`alpha`) | lista de updates (no toca nada) |
-| `apply` + `channel` + `confirm:true` | descarga→verifica hash→backup en `mods/_backup/<ts>/`→sustituye |
-| `search` + `query` + `type` (`mod`/`resourcepack`/`shader`/`datapack`) | busca en Modrinth |
-
-Contexto opcional en el body: `mc` (def. `1.21.1`), `loader` (def. `neoforge`).
-De momento se pasan por petición; un TODO es derivarlos de los metadatos del
-servidor en Crafty.
-
-Ejemplo:
 ```bash
-curl -X POST https://TU_CRAFTY/api/v2/servers/<id>/content \
-  -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
-  -d '{"action":"plan","channel":"release"}'
+export CURSEFORGE_API_KEY=your_key          # environment variable wins
+# or
+cp app/config/content.json.example app/config/content.json   # and fill it in
 ```
 
-## Frontend (pendiente)
+CurseForge projects with *"allow mod distribution"* disabled cannot be
+downloaded through the API; they are listed as **blocked** with a link to the
+project page so you can add them by hand. The install still completes.
 
-El backend está listo y probado. Falta la UI:
-1. Añadir pestaña "Content" en `app/frontend/templates/server/` (junto a `files`).
-2. JS que llame al endpoint. Esqueleto:
-```js
-async function loadContent(serverId, token) {
-  const r = await fetch(`/api/v2/servers/${serverId}/content`, {
-    method: "POST",
-    headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ action: "scan" })
-  });
-  const { data } = await r.json();          // pinta tabla: nombre | source | side | update
+## Per-server API — `POST /api/v2/servers/<server_id>/content`
+
+Body is JSON with an `action`. Optional `mc` / `loader` override the detected
+server context (detected from `libraries/` first, then from the execution
+command Crafty stores for the server).
+
+| `action` | body | effect |
+|---|---|---|
+| `context` | — | `{mc, loader, mc_detected, loader_detected, cf_enabled}` |
+| `scan` / `cached` / `scan_one` | — / — / `filename` | unified inventory (source, side, update, channel…) |
+| `plan` | `channel` (`release`/`beta`/`alpha`) | list of available updates, nothing written |
+| `apply` | `channel`, `confirm:true` | download → verify hash → backup to `mods/_backup/<ts>/` → replace |
+| `search` | `query`, `type` (`mod`/`resourcepack`/`shader`/`datapack`), `limit` | search Modrinth |
+| `install` / `install_version` | `id`/`slug` (+ `version_id`) | install a project (required deps for mods too) |
+| `detail` / `versions` | `source`, `id` | project card / version list |
+| `toggle` / `remove` / `update_one` | `filename` | per-file actions |
+| `modpack_search` | `query`, `limit`, `mc`, `loader`, `source` | modpacks from Modrinth (+ CurseForge with a key); `cf_enabled` says whether CF was queried |
+| `modpack_versions` | `source`, `id` | versions with `game_versions`, `loaders`, `filename` |
+| `modpack_resolve` | `source`, `id`, `version_id` | downloads + parses the pack; returns `{name, version, mc, loader, loader_build, file_count, total_bytes, blocked, skipped, mismatch}` |
+| `modpack_install` | `source`, `id`, `version_id`, `mode` (`merge`/`replace`), `confirm:true` | starts the install in a background thread (409 `JOB_RUNNING` if one is active) |
+| `modpack_status` | — | `.content_cache/modpack_install.json` + `running` |
+
+`mode=merge` adds the pack on top of what is there (files with the same hash
+are skipped); `mode=replace` first moves the current `mods/` to
+`mods/_backup/<timestamp>/`. Restart the server afterwards.
+
+Example:
+
+```bash
+curl -X POST https://YOUR_CRAFTY/api/v2/servers/<id>/content \
+  -H "Authorization: Bearer <token>" -H "Content-Type: application/json" \
+  -d '{"action":"modpack_install","source":"modrinth","id":"AuI3VLGI","version_id":"VjrstANB","mode":"merge","confirm":true}'
+```
+
+## Creating a server from a modpack
+
+Wizard: **Create New Server → Create from a modpack** — search, paste a
+`modrinth.com/modpack/…` or `curseforge.com/minecraft/modpacks/…` link, or
+upload a `.mrpack` / CurseForge `.zip`. Crafty reads the pack's Minecraft
+version + loader, creates the server, installs that exact loader build
+(NeoForge / Forge / Fabric; Quilt is not supported by the loader installer)
+and downloads all server-side files, showing the usual "Importing…" state.
+
+API: `POST /api/v2/servers` with
+
+```json
+"minecraft_java_create_data": {
+  "create_type": "modpack",
+  "modpack_create_data": {
+    "source": "modrinth",            // modrinth | curseforge | upload
+    "project_id": "AuI3VLGI",        // or "archive_name" for source=upload
+    "version_id": "VjrstANB",
+    "pack_token": "<from /api/v2/crafty/modpack modpack_resolve, optional>",
+    "loader_build": "",              // optional override
+    "mem_min": 2, "mem_max": 4, "server_properties_port": 25565,
+    "agree_to_eula": true
+  }
 }
 ```
-3. Botones → `plan` (previsualizar), `apply` (con `confirm:true`), y buscador → `search`.
 
-## Notas de diseño
+`POST /api/v2/crafty/modpack` supports `modpack_search`, `modpack_versions`,
+`modpack_resolve` (returns a `pack_token` so the downloaded archive is reused
+by the create call) and `cf_slug` (CurseForge slug → id).
 
-- **Sin downgrades**: `plan` solo propone si la candidata es más nueva por fecha
-  de publicación (no solo "distinta").
-- **Canal por defecto `release`**; beta/alpha son opt-in.
-- **Reversible**: cada sustitución guarda el jar viejo en `mods/_backup/<timestamp>/`.
-- **allowModDistribution=false**: si CurseForge no da URL, el item se marca
-  `blocked` y se omite (descarga manual).
-- Tras `apply`, reiniciar el servidor para cargar los cambios.
+## Safety
 
-El motor original y su CLI (`scan/apply/loader/search`) viven fuera del fork en
-`D:\mc-content-manager\` (`mccm.py`), útil para pruebas sin levantar el panel.
+- Every path from a pack index or archive is validated (no `..`, no absolute
+  paths, must resolve inside the server directory); symlink entries are dropped.
+- Downloads are https-only from Modrinth's allowed hosts
+  (`cdn.modrinth.com`, `github.com`, `raw.githubusercontent.com`, `gitlab.com`)
+  and the CurseForge CDN; sha1 is verified when the index provides it.
+- Archive size / entry count are capped; the CurseForge key never reaches the browser.
+- No downgrades in `plan`; beta/alpha channels are opt-in; every replacement is backed up.
+
+## Tests
+
+`python -m pytest tests/classes/minecraft tests/classes/web/api/test_modpack_create_schema.py -q`

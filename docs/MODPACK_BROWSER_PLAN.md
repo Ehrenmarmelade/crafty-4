@@ -1,5 +1,7 @@
 # Plan: Modpack + Mod download UI for Crafty 4 (luishidalgoa fork)
 
+> **Status (2026-09-12): implemented** on `feature/modpack-browser` — see `CONTENT_MODULE.md` for the resulting API/UI. Deviations from this plan: path validation lives in `modpack_installer.safe_join` (stdlib, same semantics as `Helpers.validate_traversal`) to keep the engine self-contained; the wizard uses one `POST /api/v2/crafty/modpack` action endpoint instead of three routes; `create_type=modpack` is rewritten into a `download_jar` creation inside `create_api_server` so the existing command/registration code is reused.
+
 Branch: `feature/modpack-browser` · Fork: `Ehrenmarmelade/crafty-4` · Upstream: `luishidalgoa/crafty-4`
 
 ## 0. Current state (verified 2026-09-12)

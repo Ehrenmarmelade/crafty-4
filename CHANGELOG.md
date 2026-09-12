@@ -1,4 +1,15 @@
 # Changelog
+## --- [Unreleased] - fork: modpack browser
+### New features
+- Content tab: search and install **modpacks** (Modrinth, CurseForge with an API key) into an existing server, merge or replace mode, live progress, blocked-file list
+- Server wizard: **Create from a modpack** — search / paste link / upload `.mrpack` or CurseForge `.zip`; loader build + files installed automatically
+- `POST /api/v2/servers` accepts `create_type: "modpack"`; new `POST /api/v2/crafty/modpack` endpoint
+### Bug fixes
+- Content tab was missing from the mobile navigation
+- MC version / loader now also derived from the server record for freshly created servers
+- `content.json.example` added, `CONTENT_MODULE.md` rewritten
+<br><br>
+
 ## --- [4.10.7] - 2026/06/16
 ### Bug fixes
 - Fix python `3.13+` specific notation to add support back for `3.10-12` ([Merge Request](https://gitlab.com/crafty-controller/crafty-4/-/merge_requests/1043))
