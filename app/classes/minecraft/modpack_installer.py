@@ -114,6 +114,7 @@ class PackInfo:
     files: list = field(default_factory=list)  # list[PackFile]
     blocked: list = field(default_factory=list)  # CF allowModDistribution=false
     skipped: list = field(default_factory=list)  # client-only / bad host / path
+    client_only: list = field(default_factory=list)  # paths to remove on a server
     format: str = "mrpack"  # mrpack | curseforge
 
     def to_dict(self):
@@ -142,6 +143,7 @@ class PackInfo:
             "total_bytes": sum(f.size or 0 for f in self.files),
             "blocked": self.blocked,
             "skipped": self.skipped,
+            "client_only": len(self.client_only),
         }
 
 
@@ -322,7 +324,55 @@ class ModpackInstaller:
             else:
                 raise ModpackError("unknown_format")
         pack.archive_path = archive_path
+        self._classify_sides(pack)
         return pack
+
+    def _classify_sides(self, pack):
+        """Drop files that belong to client-only projects according to
+        Modrinth's own metadata. Pack indexes routinely mark every file as
+        server:required (whatever the exporter defaulted to), which puts
+        Sodium/Iris/minimaps on a server and crashes it at boot. Files are
+        looked up by sha1, so this also covers CurseForge packs for mods that
+        exist on both platforms. Best effort: any network failure keeps the
+        index's verdict."""
+        by_sha = {f.sha1.lower(): f for f in pack.files if f.sha1}
+        if not by_sha:
+            return
+        hashes = list(by_sha)
+        versions = {}
+        for i in range(0, len(hashes), 500):
+            _, r = _http_json(
+                f"{MODRINTH}/version_files",
+                "POST",
+                body={"hashes": hashes[i : i + 500], "algorithm": "sha1"},
+            )
+            if isinstance(r, dict):
+                versions.update({k.lower(): v for k, v in r.items()})
+        project_ids = sorted(
+            {v.get("project_id") for v in versions.values() if v.get("project_id")}
+        )
+        projects = {}
+        for i in range(0, len(project_ids), 100):
+            q = urllib.parse.quote(json.dumps(project_ids[i : i + 100]))
+            _, r = _http_json(f"{MODRINTH}/projects?ids={q}")
+            for proj in r if isinstance(r, list) else []:
+                projects[proj.get("id")] = proj
+        keep = []
+        for f in pack.files:
+            v = versions.get((f.sha1 or "").lower())
+            proj = projects.get(v.get("project_id")) if v else None
+            if proj and proj.get("server_side") == "unsupported":
+                pack.skipped.append(
+                    {
+                        "name": f.path,
+                        "reason": "client_only",
+                        "project": proj.get("title"),
+                    }
+                )
+                pack.client_only.append(f.path)
+            else:
+                keep.append(f)
+        pack.files = keep
 
     def _read_index(self, zf, name):
         info = zf.getinfo(name)
@@ -357,6 +407,10 @@ class ModpackInstaller:
             env = (f.get("env") or {}).get("server", "required")
             if env == "unsupported":
                 pack.skipped.append({"name": f.get("path"), "reason": "client_only"})
+                try:
+                    pack.client_only.append(safe_relative_path(f.get("path")))
+                except ModpackError:
+                    pass
                 continue
             try:
                 rel = safe_relative_path(f.get("path"))
@@ -509,7 +563,13 @@ class ModpackInstaller:
             started=time.time(),
             finished=None,
         )
-        summary = {"installed": [], "skipped": [], "errors": [], "backup": None}
+        summary = {
+            "installed": [],
+            "skipped": [],
+            "removed": [],
+            "errors": [],
+            "backup": None,
+        }
         if mode == "replace":
             summary["backup"] = self._backup_mods()
         for pf in pack.files:
@@ -528,6 +588,16 @@ class ModpackInstaller:
             except (ModpackError, OSError) as exc:
                 summary["errors"].append({"name": pf.path, "reason": str(exc)})
             self._bump(summary)
+        # A client-only mod on a server is always wrong: take it out even in
+        # merge mode so re-running the install repairs a broken server.
+        for rel in pack.client_only:
+            try:
+                dest = safe_join(self.server_path, rel)
+                if os.path.isfile(dest):
+                    os.remove(dest)
+                    summary["removed"].append(rel)
+            except (ModpackError, OSError) as exc:
+                summary["errors"].append({"name": rel, "reason": str(exc)})
         for prefix in pack.overrides:
             self._set_status(current=f"{prefix}/")
             try:
@@ -542,6 +612,7 @@ class ModpackInstaller:
             current="",
             finished=time.time(),
             installed=summary["installed"],
+            removed=summary["removed"],
             errors=summary["errors"],
             backup=summary["backup"],
         )

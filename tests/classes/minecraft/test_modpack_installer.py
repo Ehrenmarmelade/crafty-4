@@ -342,3 +342,32 @@ def test_resolve_rejects_archive_from_unknown_host(tmp_path, fake_net):
     with pytest.raises(ModpackError) as exc:
         ModpackInstaller(None, work_dir=str(tmp_path)).resolve("modrinth", "p1", "v1")
     assert exc.value.code == "bad_host"
+
+
+def test_modrinth_metadata_overrides_index_side_flags(mrpack, tmp_path, fake_net):
+    """The index says mods/b.jar is server:required, Modrinth says the project
+    is client-only -> it is skipped, and removed if it already sits on disk."""
+    fake_net["responses"]["/version_files"] = {
+        _sha1(JAR_B): {"project_id": "sodium"},
+        _sha1(JAR_A): {"project_id": "fabric-api"},
+    }
+    fake_net["responses"]["/projects?ids="] = [
+        {"id": "sodium", "title": "Sodium", "server_side": "unsupported"},
+        {"id": "fabric-api", "title": "Fabric API", "server_side": "required"},
+    ]
+    srv = tmp_path / "srv"
+    (srv / "mods").mkdir(parents=True)
+    (srv / "mods" / "b.jar").write_bytes(JAR_B)  # left over from a bad install
+
+    inst = ModpackInstaller(str(srv))
+    pack = inst.resolve_archive(mrpack)
+    assert [f.path for f in pack.files] == ["mods/a.jar"]
+    assert "mods/b.jar" in pack.client_only
+    assert any(s["project"] == "Sodium" for s in pack.skipped if "project" in s)
+    assert pack.summary()["client_only"] == 2  # sodium + index-declared client.jar
+
+    summary = inst.install(pack, mode="merge")
+    assert summary["removed"] == ["mods/b.jar"]
+    assert not (srv / "mods" / "b.jar").exists()
+    assert (srv / "mods" / "a.jar").exists()
+    assert URL_B not in fake_net["calls"]["download"]

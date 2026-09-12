@@ -203,12 +203,15 @@ window.MccmModpack = (function () {
             ? `<details class="mt-1"><summary>${t('errors')} (${st.errors.length})</summary><ul class="mb-0 pl-3">` +
               st.errors.map(e => `<li>${esc(e.name)}: <span class="text-muted">${esc(e.reason)}</span></li>`).join('') + `</ul></details>` : '';
         const backup = st.backup ? `<div class="small text-muted">${t('backup')} <code>${esc(st.backup)}</code></div>` : '';
+        const removed = (st.removed || []).length
+            ? `<details class="mt-1 small"><summary>${t('removed', { n: st.removed.length })}</summary><ul class="mb-0 pl-3">` +
+              st.removed.map(r => `<li>${esc(r)}</li>`).join('') + `</ul></details>` : '';
         el.innerHTML = `<div class="alert alert-${cls} py-2 mb-3">
             <div class="d-flex justify-content-between"><div><i class="ph ph-package"></i> ${head}</div>
             ${st.status === 'done' || st.status === 'error' ? `<a href="#" id="mccm-mp-dismiss" class="text-muted">&times;</a>` : ''}</div>
             ${st.status === 'running' || st.status === 'queued' || st.status === 'resolving'
                 ? `<div class="progress mt-2" style="height:6px"><div class="progress-bar" style="width:${pct}%"></div></div>` : ''}
-            ${backup}${blockedList(st.blocked)}${errs}</div>`;
+            ${backup}${removed}${blockedList(st.blocked)}${errs}</div>`;
         const d = document.getElementById('mccm-mp-dismiss');
         if (d) d.onclick = (ev) => { ev.preventDefault(); el.innerHTML = ''; el.style.display = 'none'; };
     }
