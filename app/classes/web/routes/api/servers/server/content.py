@@ -96,7 +96,17 @@ class ApiServersServerContentHandler(BaseApiHandler):
 
             if action == "context":
                 return self.finish_json(
-                    200, {"status": "ok", "data": {"mc": cm.mc, "loader": cm.loader}}
+                    200,
+                    {
+                        "status": "ok",
+                        "data": {
+                            "mc": cm.mc,
+                            "loader": cm.loader,
+                            "mc_detected": cm.mc_detected,
+                            "loader_detected": cm.loader_detected,
+                            "cf_enabled": bool(cm.cf_key),
+                        },
+                    },
                 )
 
             if action == "save_cache":

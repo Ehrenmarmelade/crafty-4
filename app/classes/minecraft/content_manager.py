@@ -17,6 +17,11 @@ UA = "crafty-content-manager/0.1"
 MODRINTH = "https://api.modrinth.com/v2"
 CURSEFORGE = "https://api.curseforge.com/v1"
 CF_LOADER = {"neoforge": 6, "forge": 1, "fabric": 4, "quilt": 5, "liteloader": 3}
+CF_LOADER_NAME = {v: k for k, v in CF_LOADER.items()}
+CF_GAME_ID = 432  # Minecraft
+CF_CLASS_MODPACK = 4471
+# loaders that Crafty can install for a server (see main_controller loader mgr)
+SERVER_LOADERS = ("fabric", "forge", "neoforge", "quilt")
 CF_RELEASETYPE = {1: "release", 2: "beta", 3: "alpha"}
 CHANNEL_RANK = {"release": 0, "beta": 1, "alpha": 2}
 
@@ -119,6 +124,10 @@ class ContentManager:
         self.cf_key = cf_key
         # Autodetecta MC/loader del servidor si no se pasan explícitos.
         dmc, dloader = self._autodetect()
+        # True when the context is real (passed in or found on disk) instead of
+        # the historical defaults below; modpack search only filters when it is.
+        self.mc_detected = bool(mc or dmc)
+        self.loader_detected = bool(loader or dloader)
         self.mc = mc or dmc or "1.21.1"
         self.loader = (loader or dloader or "neoforge").lower()
         self.lt = CF_LOADER.get(self.loader, 6)
@@ -792,14 +801,17 @@ class ContentManager:
                 )
             _, r = _http_json(url, headers={"x-api-key": self.cf_key})
             for f in (r or {}).get("data", []):
+                gvs = f.get("gameVersions", [])
                 out.append(
                     {
                         "id": f.get("id"),
-                        "name": f.get("fileName"),
+                        "name": f.get("displayName") or f.get("fileName"),
                         "type": CF_RELEASETYPE.get(f.get("releaseType")),
                         "date": f.get("fileDate"),
-                        "game_versions": f.get("gameVersions", []),
-                        "loaders": [],
+                        "game_versions": [g for g in gvs if g[:1].isdigit()],
+                        "loaders": [
+                            g.lower() for g in gvs if g.lower() in SERVER_LOADERS
+                        ],
                         "filename": f.get("fileName"),
                     }
                 )
@@ -846,6 +858,118 @@ class ContentManager:
             if good
             else {"ok": False, "reason": "hash_mismatch"}
         )
+
+    # ---------- modpacks ----------
+    def modpack_search(self, query, limit=10, mc=None, loader=None, source=None):
+        """Search modpacks on Modrinth (+ CurseForge when a key is configured).
+
+        mc/loader are soft filters; when omitted the server context is used only
+        if it was actually detected (a modpack defines its own MC + loader, so
+        the wizard searches unfiltered).
+        """
+        mc = mc if mc is not None else (self.mc if self.mc_detected else None)
+        loader = (
+            loader
+            if loader is not None
+            else (self.loader if self.loader_detected else None)
+        )
+        hits = []
+        if source in (None, "modrinth"):
+            hits.extend(self._mr_modpack_search(query, limit, mc, loader))
+        if self.cf_key and source in (None, "curseforge"):
+            hits.extend(self._cf_modpack_search(query, limit, mc, loader))
+        return {"hits": hits, "cf_enabled": bool(self.cf_key)}
+
+    def _mr_modpack_search(self, query, limit, mc, loader):
+        facets = [["project_type:modpack"]]
+        if mc:
+            facets.append([f"versions:{mc}"])
+        if loader:
+            facets.append([f"categories:{loader}"])
+        params = {
+            "query": query or "",
+            "limit": str(limit),
+            "index": "relevance" if query else "downloads",
+            "facets": json.dumps(facets),
+        }
+        _, r = _http_json(f"{MODRINTH}/search?" + urllib.parse.urlencode(params))
+        out = []
+        for h in r.get("hits", []) if isinstance(r, dict) else []:
+            cats = h.get("categories", []) + h.get("display_categories", [])
+            out.append(
+                {
+                    "source": "modrinth",
+                    "id": h.get("project_id"),
+                    "slug": h.get("slug"),
+                    "title": h.get("title"),
+                    "summary": h.get("description"),
+                    "icon": h.get("icon_url"),
+                    "author": h.get("author"),
+                    "downloads": h.get("downloads", 0),
+                    "mc_versions": h.get("versions", []),
+                    "loaders": sorted({c for c in cats if c in SERVER_LOADERS}),
+                    "url": f"https://modrinth.com/modpack/{h.get('slug')}",
+                }
+            )
+        return out
+
+    def _cf_modpack_search(self, query, limit, mc, loader):
+        params = {
+            "gameId": CF_GAME_ID,
+            "classId": CF_CLASS_MODPACK,
+            "pageSize": str(limit),
+            "sortField": 2,  # popularity
+            "sortOrder": "desc",
+        }
+        if query:
+            params["searchFilter"] = query
+        if mc:
+            params["gameVersion"] = mc
+        if loader and loader in CF_LOADER:
+            params["modLoaderType"] = CF_LOADER[loader]
+        _, r = _http_json(
+            f"{CURSEFORGE}/mods/search?" + urllib.parse.urlencode(params),
+            headers={"x-api-key": self.cf_key},
+        )
+        out = []
+        for m in (r or {}).get("data", []) or []:
+            idx = m.get("latestFilesIndexes", []) or []
+            out.append(
+                {
+                    "source": "curseforge",
+                    "id": m.get("id"),
+                    "slug": m.get("slug"),
+                    "title": m.get("name"),
+                    "summary": m.get("summary"),
+                    "icon": (m.get("logo") or {}).get("url"),
+                    "author": ((m.get("authors") or [{}])[0]).get("name"),
+                    "downloads": m.get("downloadCount", 0),
+                    "mc_versions": sorted(
+                        {i.get("gameVersion") for i in idx if i.get("gameVersion")}
+                    ),
+                    "loaders": sorted(
+                        {
+                            CF_LOADER_NAME[i["modLoader"]]
+                            for i in idx
+                            if i.get("modLoader") in CF_LOADER_NAME
+                        }
+                    ),
+                    "url": (m.get("links") or {}).get("websiteUrl"),
+                }
+            )
+        return out
+
+    def cf_slug_to_id(self, slug):
+        """Resolve a CurseForge modpack slug (from its URL) to a numeric id."""
+        if not self.cf_key:
+            return None
+        params = {"gameId": CF_GAME_ID, "classId": CF_CLASS_MODPACK, "slug": slug}
+        _, r = _http_json(
+            f"{CURSEFORGE}/mods/search?" + urllib.parse.urlencode(params),
+            headers={"x-api-key": self.cf_key},
+        )
+        data = (r or {}).get("data") or []
+        return data[0].get("id") if data else None
 
     # ---------- helpers ----------
     def _mr_projects(self, ids):
