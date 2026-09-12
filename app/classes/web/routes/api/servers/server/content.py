@@ -1,14 +1,66 @@
 import os
 import json
 import logging
+import threading
 
 from tornado.ioloop import IOLoop
 
 from app.classes.models.server_permissions import EnumPermissionsServer
 from app.classes.web.base_api_handler import BaseApiHandler
 from app.classes.minecraft.content_manager import ContentManager
+from app.classes.minecraft.modpack_installer import (
+    ModpackError,
+    ModpackInstaller,
+    PackInfo,
+)
+from app.classes.shared.websocket_manager import WebSocketManager
 
 logger = logging.getLogger(__name__)
+
+# One modpack install job per server at a time; last resolved pack per server
+# so install does not have to download the archive twice.
+_MODPACK_JOBS = {}
+_MODPACK_RESOLVED = {}
+_MODPACK_LOCK = threading.Lock()
+
+
+def _modpack_job_running(server_id):
+    t = _MODPACK_JOBS.get(server_id)
+    return bool(t and t.is_alive())
+
+
+def _t_modpack_install(server_id, server_path, cf_key, pack_dict, mode):
+    """Thread target: (re)resolve if needed, install, clean up, notify."""
+    installer = ModpackInstaller(server_path, cf_key=cf_key)
+    try:
+        pack = PackInfo.from_dict(pack_dict)
+        if not pack.archive_path or not os.path.exists(pack.archive_path):
+            pack = installer.resolve(pack.source, pack.project_id, pack.version_id)
+        result = installer.install(pack, mode=mode)
+        installer.cleanup(pack)
+        logger.info(
+            "Modpack '%s' installed on server %s (%s): %d files, %d errors",
+            pack.name,
+            server_id,
+            mode,
+            len(result["installed"]),
+            len(result["errors"]),
+        )
+    except (ModpackError, OSError) as exc:
+        logger.error("Modpack install failed on server %s: %s", server_id, exc)
+        ModpackInstaller.write_status(
+            server_path,
+            {"status": "error", "error": str(exc), "current": "", "errors": []},
+        )
+    except Exception:  # pylint: disable=broad-except
+        logger.exception("Modpack install crashed on server %s", server_id)
+        ModpackInstaller.write_status(
+            server_path,
+            {"status": "error", "error": "internal_error", "current": "", "errors": []},
+        )
+    finally:
+        _MODPACK_RESOLVED.pop(server_id, None)
+        WebSocketManager().broadcast_to_server_users(server_id, "send_start_reload", {})
 
 
 def _get_cf_key():
@@ -243,7 +295,121 @@ class ApiServersServerContentHandler(BaseApiHandler):
                 logger.info("Content update_one on server %s: %s", server_id, res)
                 return self.finish_json(200, {"status": "ok", "data": res})
 
+            if action.startswith("modpack_"):
+                return await self._modpack_action(
+                    action, data, cm, server_id, server["path"], run
+                )
+
             return self.finish_json(400, {"status": "error", "error": "UNKNOWN_ACTION"})
+        except ModpackError as e:
+            return self.finish_json(
+                400, {"status": "error", "error": e.code, "detail": e.detail}
+            )
         except Exception as e:  # pragma: no cover - defensivo
             logger.error("Content action '%s' failed: %s", action, e)
             return self.finish_json(500, {"status": "error", "error": str(e)})
+
+    # ---------------------------------------------------------- modpacks
+    async def _modpack_action(self, action, data, cm, server_id, server_path, run):
+
+        if action == "modpack_search":
+            res = await run(
+                cm.modpack_search,
+                data.get("query", ""),
+                int(data.get("limit", 12)),
+                data.get("mc"),
+                data.get("loader"),
+                data.get("source"),
+            )
+            return self.finish_json(200, {"status": "ok", "data": res})
+
+        if action == "modpack_versions":
+            vs = await run(
+                cm.versions,
+                data.get("source", "modrinth"),
+                data.get("id") or data.get("slug"),
+                bool(data.get("all", True)),
+                "modpack",
+            )
+            return self.finish_json(200, {"status": "ok", "data": vs})
+
+        if action == "modpack_status":
+            status = ModpackInstaller.read_status(server_path)
+            status["running"] = _modpack_job_running(server_id)
+            return self.finish_json(200, {"status": "ok", "data": status})
+
+        source = data.get("source", "modrinth")
+        ident = data.get("id") or data.get("slug")
+        version_id = data.get("version_id")
+        if not ident:
+            return self.finish_json(400, {"status": "error", "error": "MISSING_ID"})
+
+        if action == "modpack_resolve":
+            installer = ModpackInstaller(server_path, cf_key=cm.cf_key)
+            pack = await run(installer.resolve, source, ident, version_id)
+            with _MODPACK_LOCK:
+                _MODPACK_RESOLVED[server_id] = pack.to_dict()
+            summary = pack.summary()
+            summary["mismatch"] = {
+                "mc": bool(cm.mc_detected and pack.mc != cm.mc),
+                "loader": bool(cm.loader_detected and pack.loader != cm.loader),
+                "server_mc": cm.mc if cm.mc_detected else None,
+                "server_loader": cm.loader if cm.loader_detected else None,
+            }
+            return self.finish_json(200, {"status": "ok", "data": summary})
+
+        if action == "modpack_install":
+            if not data.get("confirm"):
+                return self.finish_json(
+                    400, {"status": "error", "error": "CONFIRM_REQUIRED"}
+                )
+            mode = data.get("mode", "merge")
+            if mode not in ("merge", "replace"):
+                return self.finish_json(400, {"status": "error", "error": "BAD_MODE"})
+            with _MODPACK_LOCK:
+                if _modpack_job_running(server_id):
+                    return self.finish_json(
+                        409, {"status": "error", "error": "JOB_RUNNING"}
+                    )
+                cached = _MODPACK_RESOLVED.get(server_id)
+                if not (
+                    cached
+                    and cached.get("source") == source
+                    and str(cached.get("project_id")) == str(ident)
+                    and (
+                        not version_id
+                        or str(cached.get("version_id")) == str(version_id)
+                    )
+                ):
+                    cached = {
+                        "source": source,
+                        "project_id": ident,
+                        "version_id": version_id,
+                        "name": "",
+                        "version": "",
+                        "mc": "",
+                        "loader": "",
+                    }
+                ModpackInstaller.write_status(
+                    server_path,
+                    {"status": "queued", "mode": mode, "current": "", "errors": []},
+                )
+                thread = threading.Thread(
+                    target=_t_modpack_install,
+                    name=f"modpack-install-{server_id}",
+                    daemon=True,
+                    args=(server_id, server_path, cm.cf_key, cached, mode),
+                )
+                _MODPACK_JOBS[server_id] = thread
+                thread.start()
+            logger.info(
+                "Modpack install queued on server %s: %s/%s@%s mode=%s",
+                server_id,
+                source,
+                ident,
+                version_id,
+                mode,
+            )
+            return self.finish_json(200, {"status": "ok", "data": {"job": "started"}})
+
+        return self.finish_json(400, {"status": "error", "error": "UNKNOWN_ACTION"})
