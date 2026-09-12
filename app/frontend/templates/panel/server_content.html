@@ -24,6 +24,9 @@ Controller - Content{% end %} {% block content %}
                     <span class="d-none d-sm-block">
                         {% include "parts/server_controls_list.html %}
                     </span>
+                    <span class="d-block d-sm-none">
+                        {% include "parts/m_server_controls_list.html %}
+                    </span>
 
                     <!-- sub-pestañas internas -->
                     <ul class="mccm-tabs mt-4" role="tablist">
@@ -105,11 +108,13 @@ Controller - Content{% end %} {% block content %}
                                 <option value="resourcepack">resourcepack</option>
                                 <option value="shader">shader</option>
                                 <option value="datapack">datapack</option>
+                                <option value="modpack">{{ translate('serverContent', 'modpack', data['lang']) }}</option>
                             </select>
                             <button id="mccm-search" class="btn btn-primary">
                                 <i class="ph ph-magnifying-glass"></i> Buscar
                             </button>
                         </div>
+                        <div id="mccm-modpack-progress" class="mt-3" style="display:none"></div>
                         <div id="mccm-results" class="mt-3">
                             <div class="text-muted">Escribe algo y pulsa Buscar. Haz clic en un resultado para ver su ficha y elegir versión.</div>
                         </div>
@@ -123,6 +128,10 @@ Controller - Content{% end %} {% block content %}
 {% end %} {% block js %}
 <script>window.MCCM_SERVER_ID = "{{ data['server_stats']['server_id']['server_id'] }}";</script>
 <script src="/static/assets/js/shared/mccm-common.js"></script>
+<script>
+    window.MCCM_I18N = {% raw translate('serverContent', 'js', data['lang']) %};
+</script>
+<script src="/static/assets/js/shared/mccm-modpack.js"></script>
 <script>
     let MCCM_INVENTORY = null;
     let MCCM_FILTER = 'all';
@@ -408,6 +417,11 @@ Controller - Content{% end %} {% block content %}
     async function mccmDoSearch() {
         const q = document.getElementById("mccm-q").value;
         const type = document.getElementById("mccm-type").value;
+        if (type === "modpack") {
+            MCCM_LAST_HITS = null;
+            await MccmModpack.search(q, document.getElementById("mccm-results"));
+            return;
+        }
         if (!MCCM_INVENTORY) { await mccmRescan(); }  // asegura saber qué está instalado
         mccmStatus("Buscando en Modrinth...", true);
         const r = await mccmApi({ action: "search", query: q, type: type, limit: 20 });
@@ -418,6 +432,14 @@ Controller - Content{% end %} {% block content %}
     }
     document.getElementById("mccm-search").onclick = mccmDoSearch;
     document.getElementById("mccm-q").addEventListener("keydown", e => { if (e.key === "Enter") mccmDoSearch(); });
+
+    MccmModpack.init({
+        api: mccmApi,
+        mode: "server",
+        progressEl: document.getElementById("mccm-modpack-progress"),
+        onDone: () => { mccmRescan(); }
+    });
+    MccmModpack.resumeIfRunning();
 
     // Al abrir: carga el último escaneo cacheado (instantáneo)
     (async function mccmInit() {
