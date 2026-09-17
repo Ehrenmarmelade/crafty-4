@@ -4,10 +4,12 @@ version: '3'
 services:
   crafty:
     container_name: crafty_container
-    image: registry.gitlab.com/crafty-controller/crafty-4:latest
+    image: ghcr.io/ehrenmarmelade/crafty-4:latest
     restart: always
     environment:
       - TZ=Etc/UTC
+      # Optional: CurseForge modpacks / CurseForge-only mods (Modrinth needs no key)
+      # - CURSEFORGE_API_KEY=your_key_here
     ports:
       - "5520-5550:5520-5550/udp" # Hytale
       - "8000:8000" # HTTP

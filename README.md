@@ -1,6 +1,41 @@
 [![Crafty Logo](app/frontend/static/assets/images/logo_long.svg)](https://craftycontrol.com)
-# Crafty Controller 4.10.7
+# Crafty Controller 4.10.7 — modpack browser fork
 > Python based Control Panel for your Minecraft Server
+
+**This fork adds a Modrinth / CurseForge browser to Crafty:** search and install
+mods, resource packs, shaders and datapacks from a per-server **Content** tab,
+install whole **modpacks** into an existing server, or **create a new server
+from a modpack** (search, paste a Modrinth/CurseForge link, or upload a
+`.mrpack` / CurseForge `.zip`) — loader and server-side files are installed
+automatically, client-only mods are filtered out. Details in
+[`CONTENT_MODULE.md`](CONTENT_MODULE.md).
+
+## Quick start (Docker) 🐳
+
+Images are published to the GitHub Container Registry for `linux/amd64` and `linux/arm64`:
+
+```bash
+mkdir crafty && cd crafty
+curl -fsSL https://raw.githubusercontent.com/Ehrenmarmelade/crafty-4/main/docker-compose.yml.example -o docker-compose.yml
+docker compose up -d
+docker compose logs -f          # wait for "Crafty has fully started"
+```
+
+Open `https://<host>:8443` and log in with the credentials from
+`docker/config/default-creds.txt` (created on first start). Data lives in the
+`./docker/*` bind mounts next to the compose file.
+
+| Tag | Meaning |
+|---|---|
+| `ghcr.io/ehrenmarmelade/crafty-4:latest` | newest commit on `main` |
+| `ghcr.io/ehrenmarmelade/crafty-4:v4.10.7-mp.1` | a specific release |
+
+- Create Minecraft servers on ports **25500–25600** (25565 is fine) — only that
+  range is published by the compose file; add other ports under `ports:`.
+- For CurseForge packs set `CURSEFORGE_API_KEY` in the compose file
+  (get one at https://console.curseforge.com). Modrinth works without a key.
+- Don't use Crafty's in-app updater on this fork; pull a newer image instead:
+  `docker compose pull && docker compose up -d`.
 
 ## What is Crafty Controller?
 Crafty Controller is a Minecraft Server Control Panel / Launcher. The purpose
