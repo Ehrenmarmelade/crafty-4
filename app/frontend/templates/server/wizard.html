@@ -305,6 +305,13 @@
             <div id="mp-upload-progress" class="mt-2" style="display:none;max-width:420px">
               <div class="progress" style="height:8px"><div id="mp-upload-bar" class="progress-bar" style="width:0%"></div></div>
             </div>
+            <div id="mp-existing-wrap" class="mt-3" style="display:none">
+              <label class="small text-muted mb-1" for="mp-existing">{{ translate('serverWizard', 'modpackUploadExisting', data['lang']) }}</label>
+              <div class="d-flex flex-wrap align-items-center" style="gap:.5rem;">
+                <select id="mp-existing" class="form-control" style="max-width:420px"></select>
+                <button id="mp-existing-go" type="button" class="btn btn-outline-primary"><i class="ph ph-arrow-right"></i> {{ translate('serverWizard', 'modpackUse', data['lang']) }}</button>
+              </div>
+            </div>
           </div>
 
           <div id="mp-selected" class="mt-4" style="display:none">
@@ -319,6 +326,12 @@
                   <div class="form-group">
                     <label for="mp-name">{{ translate('serverWizard', 'serverName', data['lang']) }}</label>
                     <input type="text" class="form-control" id="mp-name" name="name" placeholder="{{ translate('serverWizard', 'myNewServer', data['lang']) }}" required>
+                  </div>
+                </div>
+                <div class="col-sm-6" id="mp-world-wrap" style="display:none">
+                  <div class="form-group">
+                    <label for="mp-world">{{ translate('serverWizard', 'modpackWorld', data['lang']) }} <small class="text-muted"> - {{ translate('serverWizard', 'modpackWorldHint', data['lang']) }}</small></label>
+                    <select class="form-control select-css" id="mp-world" name="world"></select>
                   </div>
                 </div>
                 <div class="col-sm-6">
@@ -653,6 +666,13 @@
         MccmModpack.summaryTable(summary) +
         (summary.loader === 'quilt' ? `<div class="alert alert-danger py-2">${T('quiltUnsupported')}</div>` : '');
       fillBuilds(summary);
+      const wWrap = document.getElementById('mp-world-wrap'), wSel = document.getElementById('mp-world');
+      wSel.innerHTML = '';
+      if (summary.worlds && summary.worlds.length) {
+        const none = document.createElement('option'); none.value = ''; none.textContent = T('worldNone'); wSel.appendChild(none);
+        summary.worlds.forEach(w => { const o = document.createElement('option'); o.value = w; o.textContent = w; wSel.appendChild(o); });
+        wWrap.style.display = '';
+      } else wWrap.style.display = 'none';
       const nameEl = document.getElementById('mp-name');
       if (!nameEl.value) nameEl.value = summary.name || '';
       document.getElementById('mp-selected').style.display = '';
@@ -749,6 +769,29 @@
       }
       return file.name;
     }
+    // files already placed in import/upload (handy for multi-GB exports)
+    async function loadExisting() {
+      const r = await mpApi({ action: 'modpack_list_uploads' });
+      const wrap = document.getElementById('mp-existing-wrap'), sel = document.getElementById('mp-existing');
+      if (r.status !== 'ok' || !r.data.length) { wrap.style.display = 'none'; return; }
+      sel.innerHTML = '';
+      r.data.forEach(f => { const o = document.createElement('option'); o.value = f.name; o.textContent = `${f.name} (${(f.size / 1048576).toFixed(0)} MB)`; sel.appendChild(o); });
+      wrap.style.display = '';
+    }
+    async function resolveUpload(archiveName) {
+      mccmStatus(T('resolving'), true);
+      const r = await mpApi({ action: 'modpack_resolve', source: 'upload', archive_name: archiveName });
+      mccmStatus('');
+      if (r.status !== 'ok') { mccmStatus((T('err_' + r.error) !== 'err_' + r.error ? T('err_' + r.error) : r.error) + ' ' + (r.detail || '')); return; }
+      showSelected(r.data, { source: 'upload', archive_name: archiveName, pack_token: r.data.pack_token });
+    }
+    document.getElementById('mp-existing-go').onclick = async function () {
+      const name = document.getElementById('mp-existing').value;
+      if (!name) return;
+      this.disabled = true;
+      try { await resolveUpload(name); } finally { this.disabled = false; }
+    };
+    document.querySelector('#mp-src-tabs a[data-mp-pane="mp-pane-upload"]').addEventListener('click', loadExisting);
     document.getElementById('mp-upload').onclick = async function () {
       const f = fileEl.files[0];
       if (!f) return;
@@ -756,11 +799,7 @@
       try {
         mccmStatus(T('uploading'), true);
         const archiveName = await uploadArchive(f);
-        mccmStatus(T('resolving'), true);
-        const r = await mpApi({ action: 'modpack_resolve', source: 'upload', archive_name: archiveName });
-        mccmStatus('');
-        if (r.status !== 'ok') { mccmStatus((T('err_' + r.error) !== 'err_' + r.error ? T('err_' + r.error) : r.error) + ' ' + (r.detail || '')); return; }
-        showSelected(r.data, { source: 'upload', archive_name: archiveName, pack_token: r.data.pack_token });
+        await resolveUpload(archiveName);
       } catch (e) {
         mccmStatus(T('failed') + ': ' + e.message);
       } finally {
@@ -785,6 +824,7 @@
         server_properties_port: parseInt(fd.port, 10),
       };
       if (selected.source === 'upload') mp.archive_name = selected.archive_name;
+      if (fd.world) mp.world = fd.world;
       else { mp.project_id = selected.project_id; mp.version_id = selected.version_id; }
       const send_data = {
         name: fd.name,

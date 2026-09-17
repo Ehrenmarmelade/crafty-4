@@ -4,6 +4,10 @@
 - Content tab: search and install **modpacks** (Modrinth, CurseForge with an API key) into an existing server, merge or replace mode, live progress, blocked-file list
 - Server wizard: **Create from a modpack** — search / paste link / upload `.mrpack` or CurseForge `.zip`; loader build + files installed automatically
 - `POST /api/v2/servers` accepts `create_type: "modpack"`; new `POST /api/v2/crafty/modpack` endpoint
+- Wizard also accepts **Prism / MultiMC instance exports** (uses your actual jars, optional singleplayer save as world) and **Crafty server packs**; files can be picked from `import/upload/` directly
+- **Export server pack** on the Content tab: shareable zip (server-side mods, configs, loader installer, README) — no world
+- Client-only mods are detected via Modrinth metadata (also for hand-added jars) instead of trusting the pack index
+- Published image: `ghcr.io/ehrenmarmelade/crafty-4`
 ### Bug fixes
 - Content tab was missing from the mobile navigation
 - MC version / loader now also derived from the server record for freshly created servers

@@ -131,6 +131,7 @@ window.MccmModpack = (function () {
         const row = (label, value) => `<tr><td class="text-muted" style="width:40%;white-space:nowrap">${label}</td><td>${value}</td></tr>`;
         return `<table class="table table-sm mb-2"><tbody>` +
             row(t('pack'), `${esc(s.name)} <span class="text-muted">${esc(s.version)}</span>`) +
+            row(t('format'), t('fmt_' + (s.format || 'mrpack'))) +
             row(t('mcCol'), esc(s.mc)) +
             row(t('loaderCol'), esc(s.loader) + (s.loader_build ? ' <span class="text-muted">' + esc(s.loader_build) + '</span>' : '')) +
             row(t('files'), `${s.file_count} <span class="text-muted">${fmtBytes(s.total_bytes)}</span>` +

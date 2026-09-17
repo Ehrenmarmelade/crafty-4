@@ -17,6 +17,7 @@ Progress is pushed through ``progress_cb`` and mirrored to
 import hashlib
 import json
 import os
+import re
 import shutil
 import tempfile
 import time
@@ -44,7 +45,7 @@ ALLOWED_HOSTS = {
     "mediafilez.forgecdn.net",
     "media.forgecdn.net",
 }
-MAX_ARCHIVE_BYTES = 512 * 1024 * 1024
+MAX_ARCHIVE_BYTES = 4 * 1024 * 1024 * 1024  # instance exports carry worlds
 MAX_ARCHIVE_ENTRIES = 20000
 MAX_INDEX_BYTES = 16 * 1024 * 1024
 STATUS_REL_PATH = os.path.join(".content_cache", "modpack_install.json")
@@ -54,6 +55,37 @@ MRPACK_LOADER_KEYS = {
     "neoforge": "neoforge",
     "quilt-loader": "quilt",
 }
+# Prism / MultiMC instance exports: component uid -> loader
+MMC_LOADER_UIDS = {
+    "net.fabricmc.fabric-loader": "fabric",
+    "net.minecraftforge": "forge",
+    "net.neoforged": "neoforge",
+    "org.quiltmc.quilt-loader": "quilt",
+}
+# Client-side clutter inside an instance's game dir that has no business on a
+# server (directories end with "/"). Everything else is copied as overrides.
+INSTANCE_SKIP = (
+    "saves/",
+    "screenshots/",
+    "logs/",
+    "crash-reports/",
+    "resourcepacks/",
+    "shaderpacks/",
+    "texturepacks/",
+    "downloads/",
+    ".cache/",
+    ".fabric/",
+    ".mixin.out/",
+    "mods/.index/",
+    "options.txt",
+    "servers.dat",
+    "servers.dat_old",
+    "realms_persistence.json",
+    "command_history.txt",
+    "usercache.json",
+    "usernamecache.json",
+    "cgs-options.txt",
+)
 
 
 # Packs resolved by the wizard before a server exists, keyed by token so the
@@ -115,7 +147,10 @@ class PackInfo:
     blocked: list = field(default_factory=list)  # CF allowModDistribution=false
     skipped: list = field(default_factory=list)  # client-only / bad host / path
     client_only: list = field(default_factory=list)  # paths to remove on a server
-    format: str = "mrpack"  # mrpack | curseforge
+    format: str = "mrpack"  # mrpack | curseforge | prism
+    override_skip: list = field(default_factory=list)  # relative prefixes to drop
+    worlds: list = field(default_factory=list)  # singleplayer saves in an export
+    world: str = None  # save to import as world/ (chosen by the user)
 
     def to_dict(self):
         return asdict(self)
@@ -144,6 +179,7 @@ class PackInfo:
             "blocked": self.blocked,
             "skipped": self.skipped,
             "client_only": len(self.client_only),
+            "worlds": self.worlds,
         }
 
 
@@ -317,7 +353,11 @@ class ModpackInstaller:
             names = zf.namelist()
             if len(names) > MAX_ARCHIVE_ENTRIES:
                 raise ModpackError("archive_too_many_entries")
-            if "modrinth.index.json" in names:
+            if "server-pack.json" in names:
+                pack = self._parse_serverpack(zf)
+            elif "mmc-pack.json" in names:
+                pack = self._parse_prism(zf, names)
+            elif "modrinth.index.json" in names:
                 pack = self._parse_mrpack(zf)
             elif "manifest.json" in names:
                 pack = self._parse_curseforge(zf)
@@ -327,18 +367,100 @@ class ModpackInstaller:
         self._classify_sides(pack)
         return pack
 
-    def _classify_sides(self, pack):
-        """Drop files that belong to client-only projects according to
-        Modrinth's own metadata. Pack indexes routinely mark every file as
-        server:required (whatever the exporter defaulted to), which puts
-        Sodium/Iris/minimaps on a server and crashes it at boot. Files are
-        looked up by sha1, so this also covers CurseForge packs for mods that
-        exist on both platforms. Best effort: any network failure keeps the
-        index's verdict."""
-        by_sha = {f.sha1.lower(): f for f in pack.files if f.sha1}
-        if not by_sha:
-            return
-        hashes = list(by_sha)
+    def _parse_prism(self, zf, names):
+        """Prism Launcher / MultiMC instance export: mmc-pack.json names the
+        exact MC + loader build, and the game dir holds the real jars and
+        configs, so nothing needs downloading. The game dir is applied as
+        overrides minus client clutter; singleplayer saves are offered as
+        importable worlds."""
+        meta = self._read_index(zf, "mmc-pack.json")
+        mc, loader, build = None, None, None
+        for comp in meta.get("components", []) or []:
+            uid = comp.get("uid", "")
+            ver = comp.get("version") or comp.get("cachedVersion")
+            if uid == "net.minecraft":
+                mc = ver
+            elif uid in MMC_LOADER_UIDS:
+                loader, build = MMC_LOADER_UIDS[uid], ver
+        if not mc or not loader:
+            raise ModpackError("missing_dependencies", f"mc={mc} loader={loader}")
+        name, version = "instance", ""
+        if "instance.cfg" in names:
+            cfg = {}
+            for line in zf.read("instance.cfg").decode("utf-8", "ignore").splitlines():
+                if "=" in line:
+                    k, v = line.split("=", 1)
+                    cfg[k.strip()] = v.strip()
+            name = cfg.get("name") or cfg.get("ManagedPackName") or name
+            version = cfg.get("ManagedPackVersionName") or ""
+        gamedir = next(
+            (
+                d
+                for d in ("minecraft", ".minecraft")
+                if any(n.startswith(d + "/") for n in names)
+            ),
+            None,
+        )
+        if not gamedir:
+            raise ModpackError("bad_archive", "no minecraft/ game directory in export")
+        worlds = sorted(
+            {
+                n.split("/")[2]
+                for n in names
+                if n.startswith(gamedir + "/saves/") and n.count("/") >= 3
+            }
+        )
+        return PackInfo(
+            source="upload",
+            format="prism",
+            name=name,
+            version=version,
+            mc=mc,
+            loader=loader,
+            loader_build=build,
+            overrides=[gamedir],
+            override_skip=list(INSTANCE_SKIP),
+            worlds=worlds,
+        )
+
+    def _parse_serverpack(self, zf):
+        """A server pack exported by this module (server_pack_export.py):
+        everything is local, the manifest names MC + loader build."""
+        meta = self._read_index(zf, "server-pack.json")
+        loader, mc, build = (
+            meta.get("loader"),
+            meta.get("minecraft"),
+            meta.get("loader_build"),
+        )
+        if loader == "forge" and build and "-" in build:
+            build = build.split("-", 1)[1]
+        if not mc or loader not in ("fabric", "forge", "neoforge", "quilt"):
+            raise ModpackError("missing_dependencies", f"mc={mc} loader={loader}")
+        skip = [
+            "server-pack.json",
+            "README-SERVER.txt",
+            "eula.txt",
+            "run.sh",
+            "run.bat",
+        ]
+        skip += [
+            n for n in zf.namelist() if re.match(r"^[^/]+-installer-[^/]+\.jar$", n)
+        ]
+        return PackInfo(
+            source="upload",
+            format="serverpack",
+            name=meta.get("name") or "server pack",
+            version=meta.get("generated", ""),
+            mc=mc,
+            loader=loader,
+            loader_build=build,
+            overrides=[""],
+            override_skip=skip,
+        )
+
+    def lookup_sides(self, hashes):
+        """sha1 -> Modrinth project (with server_side) for known hashes."""
+        hashes = sorted({h.lower() for h in hashes if h})
         versions = {}
         for i in range(0, len(hashes), 500):
             _, r = _http_json(
@@ -357,10 +479,27 @@ class ModpackInstaller:
             _, r = _http_json(f"{MODRINTH}/projects?ids={q}")
             for proj in r if isinstance(r, list) else []:
                 projects[proj.get("id")] = proj
+        out = {}
+        for sha, v in versions.items():
+            proj = projects.get(v.get("project_id"))
+            if proj:
+                out[sha] = proj
+        return out
+
+    def _classify_sides(self, pack):
+        """Drop files that belong to client-only projects according to
+        Modrinth's own metadata. Pack indexes routinely mark every file as
+        server:required (whatever the exporter defaulted to), which puts
+        Sodium/Iris/minimaps on a server and crashes it at boot. Files are
+        looked up by sha1, so this also covers CurseForge packs for mods that
+        exist on both platforms. Best effort: any network failure keeps the
+        index's verdict."""
+        projects = self.lookup_sides([f.sha1 for f in pack.files if f.sha1])
+        if not projects:
+            return
         keep = []
         for f in pack.files:
-            v = versions.get((f.sha1 or "").lower())
-            proj = projects.get(v.get("project_id")) if v else None
+            proj = projects.get((f.sha1 or "").lower())
             if proj and proj.get("server_side") == "unsupported":
                 pack.skipped.append(
                     {
@@ -579,7 +718,7 @@ class ModpackInstaller:
                 if (
                     os.path.exists(dest)
                     and pf.sha1
-                    and self._sha1(dest) == pf.sha1.lower()
+                    and self.sha1_of(dest) == pf.sha1.lower()
                 ):
                     summary["skipped"].append(pf.path)
                 else:
@@ -598,15 +737,29 @@ class ModpackInstaller:
                     summary["removed"].append(rel)
             except (ModpackError, OSError) as exc:
                 summary["errors"].append({"name": rel, "reason": str(exc)})
+        written = []
         for prefix in pack.overrides:
             self._set_status(current=f"{prefix}/")
             try:
-                summary["installed"].extend(
-                    self._extract_overrides(pack.archive_path, prefix)
+                got = self._extract_overrides(
+                    pack.archive_path, prefix, pack.override_skip
                 )
+                written.extend(got)
+                summary["installed"].extend(got)
             except (ModpackError, OSError, zipfile.BadZipFile) as exc:
                 summary["errors"].append({"name": prefix, "reason": str(exc)})
             self._bump(summary)
+        # Jars that came in as overrides (hand-added mods, instance exports)
+        # were never hash-checked: prune client-only ones now.
+        summary["removed"].extend(self._prune_client_only_jars(written))
+        if pack.world:
+            self._set_status(current=f"saves/{pack.world}")
+            try:
+                summary["installed"].extend(
+                    self._import_world(pack.archive_path, pack.overrides[0], pack.world)
+                )
+            except (ModpackError, OSError, zipfile.BadZipFile) as exc:
+                summary["errors"].append({"name": pack.world, "reason": str(exc)})
         self._set_status(
             status="done",
             current="",
@@ -638,9 +791,74 @@ class ModpackInstaller:
             last = ModpackError("hash_mismatch", pf.name)
         raise last if last else ModpackError("download_failed", pf.name)
 
-    def _extract_overrides(self, archive_path, prefix):
+    def _extract_overrides(self, archive_path, prefix, skip=None):
         if not archive_path or not os.path.exists(archive_path):
             return []
+        skip = tuple(skip or ())
+        written = []
+        with zipfile.ZipFile(archive_path) as zf:
+            for info in zf.infolist():
+                name = info.filename.replace("\\", "/")
+                if name.endswith("/"):
+                    continue
+                if prefix:
+                    if not name.startswith(prefix + "/"):
+                        continue
+                    rel = name[len(prefix) + 1 :]
+                else:
+                    rel = name
+                if _is_symlink(info):
+                    continue
+                if any(
+                    rel.startswith(sk) if sk.endswith("/") else rel == sk for sk in skip
+                ):
+                    continue
+                try:
+                    dest = safe_join(self.server_path, rel)
+                except ModpackError:
+                    continue
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                with zf.open(info) as src, open(dest, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+                written.append(rel)
+        return written
+
+    def _prune_client_only_jars(self, rel_paths):
+        """Hash mods/*.jar written from overrides, ask Modrinth, delete the
+        client-only ones. Returns the removed relative paths."""
+        jars = {}
+        for rel in rel_paths:
+            if rel.startswith("mods/") and rel.endswith(".jar") and rel.count("/") == 1:
+                try:
+                    path = safe_join(self.server_path, rel)
+                    if os.path.isfile(path):
+                        jars[self.sha1_of(path)] = (rel, path)
+                except (ModpackError, OSError):
+                    continue
+        if not jars:
+            return []
+        projects = self.lookup_sides(list(jars))
+        removed = []
+        for sha, (rel, path) in jars.items():
+            proj = projects.get(sha)
+            if proj and proj.get("server_side") == "unsupported":
+                try:
+                    os.remove(path)
+                    removed.append(rel)
+                    self._status.setdefault("client_only_projects", []).append(
+                        proj.get("title")
+                    )
+                except OSError:
+                    pass
+        if removed:
+            self._set_status(removed=removed)
+        return removed
+
+    def _import_world(self, archive_path, gamedir, world):
+        """Copy <gamedir>/saves/<world>/ from the archive to <server>/world/."""
+        if not world:
+            return []
+        prefix = f"{gamedir}/saves/{world}"
         written = []
         with zipfile.ZipFile(archive_path) as zf:
             for info in zf.infolist():
@@ -649,7 +867,7 @@ class ModpackInstaller:
                     continue
                 if _is_symlink(info):
                     continue
-                rel = name[len(prefix) + 1 :]
+                rel = "world/" + name[len(prefix) + 1 :]
                 try:
                     dest = safe_join(self.server_path, rel)
                 except ModpackError:
@@ -674,7 +892,7 @@ class ModpackInstaller:
         return os.path.relpath(backup, self.server_path)
 
     @staticmethod
-    def _sha1(path):
+    def sha1_of(path):
         h = hashlib.sha1()
         with open(path, "rb") as f:
             for chunk in iter(lambda: f.read(65536), b""):

@@ -1495,6 +1495,10 @@ class Controller:
         jar_type = self.MODPACK_JAR_TYPES.get(pack.loader)
         if not jar_type:
             raise ValueError(f"Unsupported modpack loader: {pack.loader}")
+        world = mp.get("world") or None
+        if world and world not in pack.worlds:
+            raise ValueError(f"Unknown world in export: {world}")
+        pack.world = world
         build = mp.get("loader_build") or pack.loader_build
         if not build:
             raise ValueError("Modpack does not declare a loader build")

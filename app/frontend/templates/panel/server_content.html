@@ -62,6 +62,9 @@ Controller - Content{% end %} {% block content %}
                             <button id="mccm-apply" class="btn btn-warning" disabled>
                                 <i class="ph ph-download-simple"></i> {{ translate('serverContent', 'applyUpdates', data['lang']) }}
                             </button>
+                            <button id="mccm-export" class="btn btn-outline-secondary ml-auto" title="{{ translate('serverContent', 'exportHint', data['lang']) }}">
+                                <i class="ph ph-package"></i> {{ translate('serverContent', 'exportPack', data['lang']) }}
+                            </button>
                         </div>
 
                         <div id="mccm-summary" class="mt-3 small text-muted"></div>
@@ -345,6 +348,17 @@ Controller - Content{% end %} {% block content %}
         mccmStatus(mccmT('applied', { ok, total: r.data.results.length, backup: r.data.backup }));
         document.getElementById("mccm-apply").disabled = true;
         await mccmRescan();
+    };
+    document.getElementById("mccm-export").onclick = async function () {
+        this.disabled = true;
+        mccmStatus(mccmT('exporting'), true);
+        const r = await mccmApi({ action: "modpack_export" });
+        this.disabled = false;
+        if (r.status !== "ok") { mccmStatus(mccmT('errorPrefix', { e: r.error || '' })); return; }
+        const d = r.data, url = `/api/v2/servers/${MCCM_SERVER_ID}/files/${encodeURIComponent(d.path)}/download`;
+        mccmStatus(mccmT('exported', { mods: d.mods, n: d.removed.length, size: (d.size / 1048576).toFixed(0) }) +
+            ` <a href="${url}" class="btn btn-sm btn-primary ml-2"><i class="ph ph-download-simple"></i> ${mccmT('downloadZip')}</a>`);
+        window.open(url, '_blank');
     };
     document.getElementById("mccm-channel").onchange = () => {
         if (MCCM_INVENTORY) renderTable(MCCM_INVENTORY);

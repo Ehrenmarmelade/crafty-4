@@ -101,6 +101,34 @@ API: `POST /api/v2/servers` with
 `modpack_resolve` (returns a `pack_token` so the downloaded archive is reused
 by the create call) and `cf_slug` (CurseForge slug → id).
 
+## Sharing a pack: server pack export
+
+**Content → Installed → Export server pack** zips the server-side mods
+(client-only ones removed by Modrinth hash lookup), `config/`, `kubejs/`,
+`defaultconfigs/`, … plus the loader installer / launcher, `run.sh`/`run.bat`,
+a `README-SERVER.txt` and a `server-pack.json` manifest — **no world, no
+player data, no server.properties**. The zip lands in
+`.content_cache/exports/` and downloads through the files API
+(`action: modpack_export` on the content endpoint).
+
+The recipient can either run it as a plain server (unzip → run the installer
+→ `eula=true` → `run.sh`) or upload it in this fork's wizard, which recognises
+`server-pack.json` and builds the server from it.
+
+## Supported archive formats (wizard upload / `import/upload`)
+
+| Format | Detected by | Files |
+|---|---|---|
+| Modrinth pack | `modrinth.index.json` | downloaded (hash verified) + overrides |
+| CurseForge pack | `manifest.json` | downloaded via CF API (key required) + overrides |
+| Prism / MultiMC instance export | `mmc-pack.json` | all local: game dir copied minus client clutter; singleplayer saves offered as importable world |
+| Crafty server pack | `server-pack.json` | all local |
+
+In every case jars are hash-checked against Modrinth and client-only projects
+are dropped. Large archives can be copied straight into `import/upload/`
+(`docker/import/upload/` with the compose file) and picked from the wizard's
+"Upload file" tab instead of going through the browser.
+
 ## Safety
 
 - Every path from a pack index or archive is validated (no `..`, no absolute

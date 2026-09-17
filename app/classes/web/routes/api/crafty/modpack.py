@@ -108,6 +108,17 @@ class ApiCraftyModpackHandler(BaseApiHandler):
                 summary["cf_enabled"] = bool(cf_key)
                 return self.finish_json(200, {"status": "ok", "data": summary})
 
+            if action == "modpack_list_uploads":
+                # Big archives can be dropped straight into import/upload
+                # instead of going through the browser.
+                upload_dir = Path(self.controller.project_root, "import", "upload")
+                files = []
+                if upload_dir.is_dir():
+                    for f in sorted(upload_dir.iterdir()):
+                        if f.is_file() and f.suffix.lower() in (".mrpack", ".zip"):
+                            files.append({"name": f.name, "size": f.stat().st_size})
+                return self.finish_json(200, {"status": "ok", "data": files})
+
             if action == "cf_slug":
                 cm = ContentManager("", cf_key=cf_key)
                 cf_id = await run(cm.cf_slug_to_id, data.get("slug", ""))

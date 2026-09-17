@@ -14,6 +14,7 @@ from app.classes.minecraft.modpack_installer import (
     ModpackInstaller,
     PackInfo,
 )
+from app.classes.minecraft.server_pack_export import export_server_pack
 from app.classes.shared.websocket_manager import WebSocketManager
 
 logger = logging.getLogger(__name__)
@@ -336,6 +337,21 @@ class ApiServersServerContentHandler(BaseApiHandler):
                 "modpack",
             )
             return self.finish_json(200, {"status": "ok", "data": vs})
+
+        if action == "modpack_export":
+            # Shareable server pack: server-side mods + configs + loader
+            # installer, no world. Downloaded through the files API.
+            srv = self.controller.servers.get_server_data_by_id(server_id) or {}
+            name = data.get("name") or srv.get("server_name") or "server"
+            _, summary = await run(export_server_pack, server_path, name)
+            logger.info(
+                "Server pack exported for %s: %s (%d mods, %d client-only left out)",
+                server_id,
+                summary["path"],
+                summary["mods"],
+                len(summary["removed"]),
+            )
+            return self.finish_json(200, {"status": "ok", "data": summary})
 
         if action == "modpack_status":
             status = ModpackInstaller.read_status(server_path)

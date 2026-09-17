@@ -371,3 +371,85 @@ def test_modrinth_metadata_overrides_index_side_flags(mrpack, tmp_path, fake_net
     assert not (srv / "mods" / "b.jar").exists()
     assert (srv / "mods" / "a.jar").exists()
     assert URL_B not in fake_net["calls"]["download"]
+
+
+@pytest.fixture
+def prism_zip(tmp_path):
+    """Prism Launcher instance export: mmc-pack.json + game dir with jars, a
+    save, and client clutter."""
+    path = tmp_path / "Create Server.zip"
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr(
+            "mmc-pack.json",
+            json.dumps(
+                {
+                    "formatVersion": 1,
+                    "components": [
+                        {"uid": "org.lwjgl3", "version": "3.3.3"},
+                        {"uid": "net.minecraft", "version": "1.21.1"},
+                        {"uid": "net.neoforged", "version": "21.1.248"},
+                    ],
+                }
+            ),
+        )
+        zf.writestr(
+            "instance.cfg", "name=Create Server\nManagedPackVersionName=CU 2.0.2\n"
+        )
+        zf.writestr("minecraft/mods/server-mod.jar", JAR_A)
+        zf.writestr("minecraft/mods/client-mod.jar", JAR_B)
+        zf.writestr("minecraft/mods/.index/x.pw.toml", "packwiz")
+        zf.writestr("minecraft/config/a.toml", "a=1")
+        zf.writestr("minecraft/options.txt", "fov:80")
+        zf.writestr("minecraft/screenshots/s.png", "png")
+        zf.writestr("minecraft/shaderpacks/x.zip", "zip")
+        zf.writestr("minecraft/saves/Factorys/level.dat", "nbt")
+        zf.writestr("minecraft/saves/Factorys/region/r.0.0.mca", "mca")
+        zf.writestr("minecraft/saves/Other/level.dat", "nbt2")
+    return str(path)
+
+
+def test_prism_export_parses_loader_and_worlds(prism_zip, tmp_path, fake_net):
+    pack = ModpackInstaller(str(tmp_path / "srv")).resolve_archive(prism_zip)
+    assert pack.format == "prism"
+    assert (pack.mc, pack.loader, pack.loader_build) == (
+        "1.21.1",
+        "neoforge",
+        "21.1.248",
+    )
+    assert (pack.name, pack.version) == ("Create Server", "CU 2.0.2")
+    assert pack.files == []  # everything is local
+    assert pack.worlds == ["Factorys", "Other"]
+    assert pack.summary()["worlds"] == ["Factorys", "Other"]
+
+
+def test_prism_install_copies_game_dir_prunes_client_jars_imports_world(
+    prism_zip, tmp_path, fake_net
+):
+    fake_net["responses"]["/version_files"] = {_sha1(JAR_B): {"project_id": "cl"}}
+    fake_net["responses"]["/projects?ids="] = [
+        {"id": "cl", "title": "Client Thing", "server_side": "unsupported"}
+    ]
+    srv = tmp_path / "srv"
+    srv.mkdir()
+    inst = ModpackInstaller(str(srv))
+    pack = inst.resolve_archive(prism_zip)
+    pack.world = "Factorys"
+    summary = inst.install(pack, mode="merge")
+
+    assert (srv / "mods" / "server-mod.jar").read_bytes() == JAR_A
+    assert not (srv / "mods" / "client-mod.jar").exists()
+    assert summary["removed"] == ["mods/client-mod.jar"]
+    assert (srv / "config" / "a.toml").exists()
+    for clutter in (
+        "options.txt",
+        "screenshots",
+        "shaderpacks",
+        "saves",
+        "mods/.index",
+    ):
+        assert not (srv / clutter).exists(), clutter
+    assert (srv / "world" / "level.dat").read_text() == "nbt"
+    assert (srv / "world" / "region" / "r.0.0.mca").exists()
+    assert not (srv / "world" / "Other").exists()
+    assert summary["errors"] == []
+    assert fake_net["calls"]["download"] == []

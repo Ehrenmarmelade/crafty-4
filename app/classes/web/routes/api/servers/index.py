@@ -246,6 +246,12 @@ new_server_schema = {
                             "error": "typeString",
                             "fill": True,
                         },
+                        "world": {
+                            "title": "Singleplayer save from an instance export to use as world/",
+                            "type": "string",
+                            "error": "typeString",
+                            "fill": True,
+                        },
                         "loader_build": {
                             "title": "Override the loader build declared by the pack",
                             "type": "string",
