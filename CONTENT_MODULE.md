@@ -123,6 +123,7 @@ The recipient can either run it as a plain server (unzip → run the installer
 | CurseForge pack | `manifest.json` | downloaded via CF API (key required) + overrides |
 | Prism / MultiMC instance export | `mmc-pack.json` | all local: game dir copied minus client clutter; singleplayer saves offered as importable world |
 | Crafty server pack | `server-pack.json` | all local |
+| Server files (e.g. ATM10 `ServerFiles-x.y.zip`) | `mods/*.jar` at the root (or under one wrapping folder) | all local; MC + loader read from `variables.txt`, `startserver.sh/.bat` (`NEOFORGE_VERSION=`…), installer jar names or `libraries/`; launch scripts, installer and `libraries/` are dropped |
 
 In every case jars are hash-checked against Modrinth and client-only projects
 are dropped. Large archives can be copied straight into `import/upload/`
