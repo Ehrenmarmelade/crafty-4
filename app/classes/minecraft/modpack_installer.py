@@ -86,6 +86,44 @@ INSTANCE_SKIP = (
     "usernamecache.json",
     "cgs-options.txt",
 )
+# Plain "server files" zips (ATM, most CurseForge server packs): the pack's
+# own launcher scripts and installer are dropped, Crafty installs the loader
+# and writes its own start command.
+SERVERFILES_SKIP = (
+    "libraries/",
+    "startserver.sh",
+    "startserver.bat",
+    "startserver.ps1",
+    "start.sh",
+    "start.bat",
+    "run.sh",
+    "run.bat",
+    "run.ps1",
+    "eula.txt",
+)
+SERVERFILES_HINT_MAX = 256 * 1024
+# (regex, what it captures) matched against script/text contents and names.
+SERVERFILES_PATTERNS = (
+    (r"^\s*(?:set\s+)?\"?MINECRAFT_VERSION\s*=\s*\"?([\w.\-]+)", "mc"),
+    (r"^\s*(?:set\s+)?\"?MC_VERSION\s*=\s*\"?([\w.\-]+)", "mc"),
+    (r"^\s*(?:set\s+)?\"?MODLOADER\s*=\s*\"?(\w+)", "loader"),
+    (r"^\s*(?:set\s+)?\"?MODLOADER_VERSION\s*=\s*\"?([\w.\-]+)", "build"),
+    (r"^\s*(?:set\s+)?\"?NEOFORGE_VERSION\s*=\s*\"?(\d[\w.\-]*)", "neoforge"),
+    (r"^\s*(?:set\s+)?\"?FORGE_VERSION\s*=\s*\"?(\d[\w.\-]*)", "forge"),
+    (r"^\s*(?:set\s+)?\"?FABRIC_(?:LOADER_)?VERSION\s*=\s*\"?(\d[\w.\-]*)", "fabric"),
+    (r"^\s*(?:set\s+)?\"?QUILT_(?:LOADER_)?VERSION\s*=\s*\"?(\d[\w.\-]*)", "quilt"),
+    (r"--fml\.neoForgeVersion\s+(\S+)", "neoforge"),
+    (r"--fml\.forgeVersion\s+(\S+)", "forge"),
+    (r"--fml\.mcVersion\s+(\S+)", "mc"),
+    (
+        r"\bneoforge-(\d+\.\d+\.\d+[\w.\-]*?)-(?:installer|universal|server)\.jar",
+        "neoforge",
+    ),
+    (r"\bforge-(1\.[\d.]+-[\d.]+)-(?:installer|universal|shim)\.jar", "forge"),
+    (r"libraries/net/neoforged/neoforge/(\d[^/]*)/", "neoforge"),
+    (r"libraries/net/minecraftforge/forge/(1\.[\d.]+-[^/]+)/", "forge"),
+    (r"fabric-server-mc\.(1\.[\d.]+)-loader\.([\d.]+)-launcher", "fabric-mc"),
+)
 
 
 # Packs resolved by the wizard before a server exists, keyed by token so the
@@ -147,7 +185,7 @@ class PackInfo:
     blocked: list = field(default_factory=list)  # CF allowModDistribution=false
     skipped: list = field(default_factory=list)  # client-only / bad host / path
     client_only: list = field(default_factory=list)  # paths to remove on a server
-    format: str = "mrpack"  # mrpack | curseforge | prism
+    format: str = "mrpack"  # mrpack | curseforge | prism | serverpack | serverfiles
     override_skip: list = field(default_factory=list)  # relative prefixes to drop
     worlds: list = field(default_factory=list)  # singleplayer saves in an export
     world: str = None  # save to import as world/ (chosen by the user)
@@ -189,6 +227,35 @@ def parse_loader_id(loader_id):
         return (loader_id or "").lower(), None
     name, build = loader_id.split("-", 1)
     return name.lower(), build
+
+
+def neoforge_mc_version(build):
+    """NeoForge encodes the MC version in its build: 21.1.251 -> 1.21.1,
+    21.0.x -> 1.21, 20.4.x -> 1.20.4, 26.1.0.x -> 26.1 (year-based MC)."""
+    m = re.match(r"^(\d+)\.(\d+)(?:\.(\d+))?", build or "")
+    if not m:
+        return None
+    major, minor = int(m.group(1)), int(m.group(2))
+    if 26 <= major < 40:
+        patch = int(m.group(3) or 0) if build.count(".") >= 3 else 0
+        return f"{major}.{minor}" + (f".{patch}" if patch else "")
+    if 20 <= major < 26:
+        return f"1.{major}" + (f".{minor}" if minor else "")
+    return None  # 47.1.x = legacy net.neoforged:forge for 1.20.1
+
+
+def serverfiles_root(names):
+    """Directory prefix ("" or "Folder") holding mods/*.jar in a server files
+    zip, or None when the archive does not look like one. Tolerates the whole
+    pack being wrapped in a single top-level folder."""
+    if any(n.startswith("mods/") and n.endswith(".jar") for n in names):
+        return ""
+    tops = {n.split("/", 1)[0] for n in names if n}
+    if len(tops) == 1:
+        top = tops.pop()
+        if any(n.startswith(top + "/mods/") and n.endswith(".jar") for n in names):
+            return top
+    return None
 
 
 def safe_relative_path(rel):
@@ -353,12 +420,17 @@ class ModpackInstaller:
             names = zf.namelist()
             if len(names) > MAX_ARCHIVE_ENTRIES:
                 raise ModpackError("archive_too_many_entries")
+            sf_root = serverfiles_root(names)
             if "server-pack.json" in names:
                 pack = self._parse_serverpack(zf)
             elif "mmc-pack.json" in names:
                 pack = self._parse_prism(zf, names)
             elif "modrinth.index.json" in names:
                 pack = self._parse_mrpack(zf)
+            elif sf_root is not None:
+                # Checked before manifest.json: some server packs ship the CF
+                # manifest next to the real mods/, which need no download.
+                pack = self._parse_serverfiles(zf, names, sf_root, archive_path)
             elif "manifest.json" in names:
                 pack = self._parse_curseforge(zf)
             else:
@@ -421,6 +493,80 @@ class ModpackInstaller:
             overrides=[gamedir],
             override_skip=list(INSTANCE_SKIP),
             worlds=worlds,
+        )
+
+    def _parse_serverfiles(self, zf, names, root, archive_path):
+        """Server files zip as published next to CurseForge/Modrinth packs
+        (e.g. ATM10 ServerFiles-x.y.zip): mods/, config/... plus launcher
+        scripts, no index. MC + loader build are read from the scripts,
+        variables.txt, installer jar names or libraries/ paths."""
+        pre = root + "/" if root else ""
+        hints = {}
+
+        def feed(text):
+            for pattern, key in SERVERFILES_PATTERNS:
+                for m in re.finditer(pattern, text, re.I | re.M):
+                    if key == "fabric-mc":
+                        hints.setdefault("mc", m.group(1))
+                        hints.setdefault("fabric", m.group(2))
+                    else:
+                        hints.setdefault(key, m.group(1).strip())
+
+        top_level = [n[len(pre) :] for n in names if n.startswith(pre)]
+        # variables.txt (ServerStarterScripts) first: it is the most explicit.
+        hint_files = sorted(
+            (
+                n
+                for n in top_level
+                if "/" not in n
+                and re.search(r"\.(sh|bat|cmd|ps1|txt|cfg|properties|ya?ml)$", n, re.I)
+            ),
+            key=lambda n: (n.lower() != "variables.txt", n.lower()),
+        )
+        hint_files += [
+            n for n in top_level if n.endswith(("unix_args.txt", "win_args.txt"))
+        ]
+        for rel in hint_files:
+            info = zf.getinfo(pre + rel)
+            if info.file_size <= SERVERFILES_HINT_MAX:
+                feed(zf.read(info).decode("utf-8", "ignore"))
+        feed("\n".join(top_level))
+
+        loader, build = None, None
+        declared = (hints.get("loader") or "").lower()
+        if declared in ("neoforge", "forge", "fabric", "quilt") and hints.get("build"):
+            loader, build = declared, hints["build"]
+        else:
+            for key in ("neoforge", "forge", "fabric", "quilt"):
+                if hints.get(key):
+                    loader, build = key, hints[key]
+                    break
+        mc = hints.get("mc")
+        if loader == "forge" and build and re.match(r"^1\.[\d.]+-", build):
+            fmc, build = build.split("-", 1)
+            mc = mc or fmc
+        if loader == "neoforge" and not mc:
+            mc = neoforge_mc_version(build)
+        if not mc or not loader:
+            raise ModpackError(
+                "missing_dependencies",
+                f"server files: mc={mc} loader={loader} build={build}",
+            )
+        name = os.path.splitext(os.path.basename(archive_path))[0]
+        skip = list(SERVERFILES_SKIP)
+        skip += [
+            n for n in top_level if "/" not in n and re.search(r"installer.*\.jar$", n)
+        ]
+        return PackInfo(
+            source="upload",
+            format="serverfiles",
+            name=root or name,
+            version="",
+            mc=mc,
+            loader=loader,
+            loader_build=build,
+            overrides=[root],
+            override_skip=skip,
         )
 
     def _parse_serverpack(self, zf):

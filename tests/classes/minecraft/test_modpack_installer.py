@@ -453,3 +453,94 @@ def test_prism_install_copies_game_dir_prunes_client_jars_imports_world(
     assert not (srv / "world" / "Other").exists()
     assert summary["errors"] == []
     assert fake_net["calls"]["download"] == []
+
+
+# ------------------------------------------------------------- server files
+ATM_STARTSERVER_SH = """#!/bin/sh
+set -eu
+NEOFORGE_VERSION=21.1.251
+INSTALLER="neoforge-$NEOFORGE_VERSION-installer.jar"
+"""
+
+
+@pytest.fixture
+def serverfiles_zip(tmp_path):
+    """Shaped like ATM10's ServerFiles-x.y.zip: no index, just the server."""
+    path = tmp_path / "ServerFiles-8.2.zip"
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("mods/server-mod.jar", JAR_A)
+        zf.writestr("config/a.toml", "a=1")
+        zf.writestr("kubejs/server_scripts/x.js", "//")
+        zf.writestr("startserver.sh", ATM_STARTSERVER_SH)
+        zf.writestr("startserver.bat", "set NEOFORGE_VERSION=21.1.251\r\n")
+        zf.writestr("neoforge-21.1.251-installer.jar", b"installer")
+        zf.writestr("user_jvm_args.txt", "-Xmx8G")
+        zf.writestr("server-icon.png", b"png")
+    return str(path)
+
+
+def test_neoforge_mc_version():
+    assert mi.neoforge_mc_version("21.1.251") == "1.21.1"
+    assert mi.neoforge_mc_version("21.0.167") == "1.21"
+    assert mi.neoforge_mc_version("20.4.237") == "1.20.4"
+    assert mi.neoforge_mc_version("47.1.106") is None
+
+
+def test_serverfiles_zip_is_recognised(serverfiles_zip, tmp_path, fake_net):
+    pack = ModpackInstaller(str(tmp_path / "srv")).resolve_archive(serverfiles_zip)
+    assert pack.format == "serverfiles"
+    assert (pack.mc, pack.loader, pack.loader_build) == (
+        "1.21.1",
+        "neoforge",
+        "21.1.251",
+    )
+    assert pack.name == "ServerFiles-8.2"
+    assert pack.files == []
+
+
+def test_serverfiles_install_copies_everything_but_launchers(
+    serverfiles_zip, tmp_path, fake_net
+):
+    srv = tmp_path / "srv"
+    srv.mkdir()
+    inst = ModpackInstaller(str(srv))
+    summary = inst.install(inst.resolve_archive(serverfiles_zip), mode="merge")
+    assert (srv / "mods" / "server-mod.jar").read_bytes() == JAR_A
+    assert (srv / "config" / "a.toml").exists()
+    assert (srv / "kubejs" / "server_scripts" / "x.js").exists()
+    for dropped in ("startserver.sh", "neoforge-21.1.251-installer.jar"):
+        assert not (srv / dropped).exists(), dropped
+    assert summary["errors"] == []
+    assert fake_net["calls"]["download"] == []
+
+
+def test_serverfiles_wrapped_folder_and_variables_txt(tmp_path, fake_net):
+    path = tmp_path / "pack.zip"
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("Server-Files-1.0/mods/a.jar", JAR_A)
+        zf.writestr("Server-Files-1.0/manifest.json", "{}")
+        zf.writestr(
+            "Server-Files-1.0/variables.txt",
+            "MINECRAFT_VERSION=1.20.1\nMODLOADER=Forge\nMODLOADER_VERSION=47.3.0\n",
+        )
+    srv = tmp_path / "srv"
+    srv.mkdir()
+    inst = ModpackInstaller(str(srv))
+    pack = inst.resolve_archive(str(path))
+    assert (pack.format, pack.mc, pack.loader, pack.loader_build) == (
+        "serverfiles",
+        "1.20.1",
+        "forge",
+        "47.3.0",
+    )
+    inst.install(pack)
+    assert (srv / "mods" / "a.jar").read_bytes() == JAR_A
+
+
+def test_serverfiles_without_loader_hint_is_rejected(tmp_path, fake_net):
+    path = tmp_path / "pack.zip"
+    with zipfile.ZipFile(path, "w") as zf:
+        zf.writestr("mods/a.jar", JAR_A)
+    with pytest.raises(ModpackError) as exc:
+        ModpackInstaller(str(tmp_path)).resolve_archive(str(path))
+    assert exc.value.code == "missing_dependencies"
